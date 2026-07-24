@@ -301,9 +301,12 @@ export default function DialogBox() {
         </span>
       </div>
 
-      {/* 对话记录 */}
+      {/* 对话记录（可上下拖拽调整高度：右下角把手） */}
       {turns.length > 0 && (
-        <div className="max-h-40 space-y-2 overflow-y-auto px-3 py-2">
+        <div
+          className="mx-3 mt-2 space-y-2 overflow-y-auto rounded-sm border border-border bg-bg-void px-3 py-2"
+          style={{ resize: "vertical", height: 200, minHeight: 80, maxHeight: 560 }}
+        >
           {turns.map((t, i) => (
             <div key={i} className="text-xs leading-relaxed">
               {t.role === "user" && <span className="text-fg-secondary">你 · </span>}
@@ -329,10 +332,14 @@ export default function DialogBox() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendFree();
+              // 回车直接发送；中文输入法组字中的回车不触发（isComposing）
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                sendFree();
+              }
             }}
             disabled={busy}
-            placeholder={busy ? "思考中…" : "问点什么…（⌘↵ 发送）"}
+            placeholder={busy ? "思考中…" : "问点什么…（↵ 发送）"}
             className="flex-1 bg-transparent text-sm text-fg-primary outline-none placeholder:text-fg-tertiary"
           />
           <button
@@ -340,7 +347,7 @@ export default function DialogBox() {
             disabled={busy || !input.trim()}
             className="label-mono text-fg-tertiary hover:text-fg-primary disabled:opacity-40"
           >
-            ⌘↵
+            ↵
           </button>
         </div>
 
