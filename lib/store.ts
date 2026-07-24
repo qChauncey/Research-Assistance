@@ -80,6 +80,8 @@ interface AppState {
   selectedNodeId: string | null;
   /** 跨栏检索请求：中栏对话框点「检索」→ 左栏接住并执行 */
   pendingSearch: string | null;
+  /** 跨栏红队请求：右栏树工具栏点「红队」→ 中栏对话框接住并执行（节点 id） */
+  pendingRedTeam: string | null;
 
   // —— 生命周期 ——
   init: () => Promise<void>;
@@ -116,11 +118,20 @@ interface AppState {
   updateLibraryItem: (id: string, patch: Partial<LibraryItem>) => Promise<void>;
   removeLibraryItem: (id: string) => Promise<void>;
 
+  // —— 候选区（约束四：AI 产出永不自动入树，判死/采纳才生效） ——
+  addCandidate: (
+    c: Omit<Candidate, "id" | "project_id" | "created_at" | "verdict">,
+  ) => Promise<void>;
+  rejectCandidate: (id: string) => Promise<void>;
+  acceptCandidate: (id: string) => Promise<void>;
+
   // —— 会话 ——
   setUser: (userId: string | null, email: string | null) => Promise<void>;
   refreshProject: () => Promise<void>;
   requestSearch: (query: string) => void;
   clearPendingSearch: () => void;
+  requestRedTeam: (nodeId: string) => void;
+  clearPendingRedTeam: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -137,6 +148,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   library: [],
   selectedNodeId: null,
   pendingSearch: null,
+  pendingRedTeam: null,
 
   init: async () => {
     const [apiConfig, language, onboarded, activeProjectId, userId, userEmail] =
@@ -354,6 +366,69 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ library: s.library.filter((l) => l.id !== id) }));
   },
 
+  addCandidate: async (c) => {
+    const { project } = get();
+    if (!project) return;
+    const cand: Candidate = {
+      ...c,
+      id: uid(),
+      project_id: project.id,
+      verdict: "pending",
+      created_at: now(),
+    };
+    await db.putCandidate(cand);
+    set((s) => ({ candidates: [...s.candidates, cand] }));
+  },
+
+  rejectCandidate: async (id) => {
+    const { candidates } = get();
+    const c = candidates.find((x) => x.id === id);
+    if (!c) return;
+    const updated: Candidate = { ...c, verdict: "rejected" };
+    await db.putCandidate(updated);
+    set((s) => ({ candidates: s.candidates.map((x) => (x.id === id ? updated : x)) }));
+  },
+
+  acceptCandidate: async (id) => {
+    const { candidates, project } = get();
+    const c = candidates.find((x) => x.id === id);
+    if (!c || !project) return;
+    const content = (c.content ?? {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
+
+    if (c.kind === "counter_evidence" && c.target_node_id) {
+      // 反证据 → 挂为 stance=contradicts 的证据
+      await get().addEvidence({
+        node_id: c.target_node_id,
+        source_type: "user_reasoning",
+        stance: "contradicts",
+        strength: typeof content.strength === "number" ? content.strength : 2,
+        title: str(content.title) || undefined,
+        note: str(content.note) || str(content.issue) || str(content.content) || "红队产出",
+      });
+    } else {
+      // direction / route_diff / 建节点 → 新建节点（挂到目标节点下）
+      const schema = getDomain(project.domain);
+      const nodeType =
+        (str(content.node_type) &&
+          schema.nodeTypes.find((t) => t.id === content.node_type)?.id) ||
+        schema.nodeTypes[0].id;
+      const claim =
+        str(content.claim) || str(content.content) || str(content.summary) || "（待补充）";
+      await get().addNode({
+        claim,
+        node_type: nodeType,
+        parent_id: c.target_node_id ?? null,
+        falsifier: str(content.falsifier) || null,
+        position: null,
+      });
+    }
+
+    const updated: Candidate = { ...c, verdict: "accepted" };
+    await db.putCandidate(updated);
+    set((s) => ({ candidates: s.candidates.map((x) => (x.id === id ? updated : x)) }));
+  },
+
   setUser: async (userId, email) => {
     await Promise.all([
       db.setSetting("userId", userId),
@@ -364,6 +439,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   requestSearch: (query) => set({ pendingSearch: query }),
   clearPendingSearch: () => set({ pendingSearch: null }),
+  requestRedTeam: (nodeId) => set({ pendingRedTeam: nodeId, selectedNodeId: nodeId }),
+  clearPendingRedTeam: () => set({ pendingRedTeam: null }),
 }));
 
 /** 便捷：当前项目的领域配置。 */
