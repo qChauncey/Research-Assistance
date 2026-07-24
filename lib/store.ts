@@ -78,6 +78,8 @@ interface AppState {
   library: LibraryItem[];
 
   selectedNodeId: string | null;
+  /** 跨栏检索请求：中栏对话框点「检索」→ 左栏接住并执行 */
+  pendingSearch: string | null;
 
   // —— 生命周期 ——
   init: () => Promise<void>;
@@ -107,12 +109,18 @@ interface AppState {
   addEvidence: (e: Omit<Evidence, "id" | "project_id" | "created_at">) => Promise<void>;
   removeEvidence: (id: string) => Promise<void>;
 
-  // —— 文献库（Phase 1 本地手动） ——
-  addLibraryItem: (l: Omit<LibraryItem, "id" | "project_id" | "added_at">) => Promise<void>;
+  // —— 文献库 ——
+  addLibraryItem: (
+    l: Omit<LibraryItem, "id" | "project_id" | "added_at">,
+  ) => Promise<LibraryItem>;
+  updateLibraryItem: (id: string, patch: Partial<LibraryItem>) => Promise<void>;
+  removeLibraryItem: (id: string) => Promise<void>;
 
   // —— 会话 ——
   setUser: (userId: string | null, email: string | null) => Promise<void>;
   refreshProject: () => Promise<void>;
+  requestSearch: (query: string) => void;
+  clearPendingSearch: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -128,6 +136,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   candidates: [],
   library: [],
   selectedNodeId: null,
+  pendingSearch: null,
 
   init: async () => {
     const [apiConfig, language, onboarded, activeProjectId, userId, userEmail] =
@@ -320,7 +329,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addLibraryItem: async (l) => {
     const { project } = get();
-    if (!project) return;
+    if (!project) throw new Error("无活动项目");
     const item: LibraryItem = {
       ...l,
       id: uid(),
@@ -329,6 +338,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     await db.putLibraryItem(item);
     set((s) => ({ library: [...s.library, item] }));
+    return item;
+  },
+
+  updateLibraryItem: async (id, patch) => {
+    const existing = get().library.find((l) => l.id === id);
+    if (!existing) return;
+    const merged = { ...existing, ...patch };
+    await db.putLibraryItem(merged);
+    set((s) => ({ library: s.library.map((l) => (l.id === id ? merged : l)) }));
+  },
+
+  removeLibraryItem: async (id) => {
+    await db.deleteLibraryItem(id);
+    set((s) => ({ library: s.library.filter((l) => l.id !== id) }));
   },
 
   setUser: async (userId, email) => {
@@ -338,6 +361,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     ]);
     set({ userId, userEmail: email });
   },
+
+  requestSearch: (query) => set({ pendingSearch: query }),
+  clearPendingSearch: () => set({ pendingSearch: null }),
 }));
 
 /** 便捷：当前项目的领域配置。 */

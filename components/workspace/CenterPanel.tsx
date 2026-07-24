@@ -38,15 +38,31 @@ export default function CenterPanel() {
     if (narrativeKey) setMeta(narrativeKey, next);
   }
 
+  const requestSearch = useAppStore((s) => s.requestSearch);
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
   const actions = [
     { key: "redteam", label: `⚔ ${t.workspace.actRedTeam}`, note: t.workspace.phase3Note },
-    { key: "search", label: `⌕ ${t.workspace.actSearch}`, note: t.workspace.phase2Note },
+    // 检索在 Phase 2 已可用：用选中节点的命题触发左栏检索
+    { key: "search", label: `⌕ ${t.workspace.actSearch}`, note: null as string | null },
     { key: "diverge", label: `✦ ${t.workspace.actDiverge}`, note: t.workspace.phase3Note },
     { key: "compare", label: `⇄ ${t.workspace.actCompare}`, note: t.workspace.phase3Note },
     { key: "makenode", label: `⊕ ${t.workspace.actMakeNode}`, note: t.workspace.phase3Note },
   ];
+
+  function onAction(a: { key: string; note: string | null }) {
+    if (a.key === "search") {
+      const q = selectedNode?.claim?.trim();
+      if (q) {
+        requestSearch(q);
+        setPhaseHint(null);
+      } else {
+        setPhaseHint("先选中一个有命题的节点");
+      }
+      return;
+    }
+    setPhaseHint(a.note);
+  }
 
   return (
     <div className="flex h-full flex-col bg-bg-void">
@@ -105,7 +121,7 @@ export default function CenterPanel() {
             {actions.map((a) => (
               <button
                 key={a.key}
-                onClick={() => setPhaseHint(a.note)}
+                onClick={() => onAction(a)}
                 className="label-mono rounded-sm border border-border px-2 py-1 text-fg-tertiary hover:bg-bg-hover hover:text-fg-secondary"
               >
                 {a.label}

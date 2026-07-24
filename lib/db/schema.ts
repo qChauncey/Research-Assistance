@@ -161,6 +161,15 @@ export interface LibraryItem {
   user_note?: string;
   tags?: string[];
   added_at: string;
+
+  // —— Phase 2 全文/检索字段（§6.3.4）——
+  abstract?: string;
+  url?: string;
+  oa_pdf_url?: string;
+  /** 客户端 pdf.js 提取的全文（离线关键词检索的数据源） */
+  extracted_text?: string;
+  page_count?: number;
+  file_hash?: string;
 }
 
 /** API 配置（BYOK）—— Phase 1 只存不用（约束/§6.1 步骤 2）。 */

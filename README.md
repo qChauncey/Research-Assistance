@@ -2,7 +2,7 @@
 
 > 一个让任何人可以结构化推进自己课题的工具。核心不是"AI 帮你想"，而是把你的论证外显化，然后系统性地攻击它。
 
-本仓库实现技术设计方案 **Phase 1（纯离线版本）**，并额外接入 **Supabase Auth + 云端同步**（Phase 2 的一部分，按用户要求提前接入）。
+本仓库实现技术设计方案 **Phase 1（纯离线版本）** 与 **Phase 2（文献库 · 检索 · 全文 · 分级 · 云端同步）**。
 
 ---
 
@@ -26,6 +26,22 @@
 | i18n 骨架 | 中英两种界面文案，未翻译语言回落英文 |
 | IndexedDB 持久化 | 全部状态本地存储（用 `idb`，非 localStorage） |
 | 候选区结构 | AI 产出隔离缓冲的数据结构与 UI 位置已预留（约束四），Phase 3 接 LLM |
+
+## Phase 2 已实现
+
+| 项 | 说明 |
+|---|---|
+| 文献检索 | OpenAlex + arXiv，经服务端 `/api/search` 并发查询、合并去重、按相关度排序（避开浏览器 CORS） |
+| 挂载为证据 | 检索结果 / 库内条目一键挂载到选中节点，选立场（支持/反对/含混），强度由 GRADE 自动建议 |
+| PDF 上传 + 全文提取 | 客户端 pdf.js 提取全文与元数据（DOI/年份/标题），拖拽或按钮上传 |
+| 归档状态机 | 仅元数据 → 用户上传原文（合并转「有原文」）；`fulltext_status` 永远可见 |
+| 本地库关键词检索 | 纯离线可用：对已上传文献的全文做关键词匹配并高亮片段（§1.1 功能边界） |
+| GRADE 证据分级 | 按研究设计定基线，小样本/无盲法/无预注册/未重复自动降级（A.3.2） |
+| Supabase 云端 | Auth 登录/注册 + 项目 push/pull 同步 + RLS |
+| pgvector 语义检索 | 建表 + `match_papers`/`match_library_chunks` RPC + BYOK 嵌入薄转发代理 `/api/embed`（不落盘） |
+
+> 依赖外部网络的部分（OpenAlex/arXiv 检索、pgvector 嵌入）在受限沙箱中被拦截，需在
+> Vercel 等开放网络验证；PDF 提取、GRADE、本地库检索为纯客户端，已本地端到端验证。
 
 ## 技术栈
 
@@ -66,14 +82,20 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="<anon key>"
 
 ### 2. 建表
 
-在 Supabase 控制台 → **SQL Editor** 执行：
+在 Supabase 控制台 → **SQL Editor** 依次执行：
 
 ```
-supabase/migrations/0001_init.sql
+supabase/migrations/0001_init.sql   # 五张核心表 + RLS
+supabase/migrations/0002_pgvector.sql  # pgvector 扩展、papers/library_chunks、match RPC
 ```
 
-该脚本创建 `projects / nodes / evidence / candidates / library_items` 五张表，字段与
+`0001` 创建 `projects / nodes / evidence / candidates / library_items`，字段与
 `lib/db/schema.ts` 的 TypeScript 类型一一对应，并启用 **RLS**（每个用户只能读写自己的项目）。
+`0002` 启用 pgvector 语义检索基础设施（维度 1536，对应 text-embedding-3-small）。
+
+**嵌入（可选，语义检索用）**：pgvector 检索需要 embedding。采用 BYOK，客户端把
+OpenAI key 随请求发给 `/api/embed` 薄转发代理，**服务端不落盘、不记录**（§1.1 方案 A）。
+无 key 时自动降级为本地/关键词检索，不影响其他功能。
 
 ### 3. 使用
 
@@ -105,7 +127,10 @@ supabase/migrations/0001_init.sql
 ## 目录结构
 
 ```
-app/                     Next.js App Router（layout / page / globals.css / icon）
+app/
+  api/search/            OpenAlex + arXiv 检索路由（服务端）
+  api/embed/             BYOK 嵌入薄转发代理（不落盘）
+  layout / page / globals.css / icon
 components/
   onboarding/            四步引导
   workspace/             三栏工作区（Header / Left / Center / Right / Maturity）
@@ -114,10 +139,13 @@ components/
 lib/
   domains/               四套领域配置（对照附录 A）
   db/                    schema 类型 · IndexedDB 存储 · 导入导出 · 迁移
+  search/                OpenAlex / arXiv 客户端 · 合并去重 · 本地关键词检索
   i18n/                  中英文案
   supabase/              client · sync
   store.ts               zustand 中央状态
   methodology.ts         falsifier 判定 · 成熟度指标
+  grade.ts               GRADE 证据分级（A.3.2）
+  pdf.ts                 pdf.js 全文提取 + 分块
   layout.ts              dagre 自动布局
-supabase/migrations/     云端建表 SQL
+supabase/migrations/     云端建表 SQL（0001 核心 · 0002 pgvector）
 ```

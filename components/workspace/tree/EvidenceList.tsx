@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useAppStore } from "@/lib/store";
 import { Button, Input } from "@/components/ui/primitives";
-import type { EvidenceStance } from "@/lib/db/schema";
+import { suggestStrength } from "@/lib/grade";
+import type { EvidenceStance, Domain } from "@/lib/db/schema";
 
 /**
  * 节点证据列表（约束一：反证据与支持证据完全对等，反证据用红色永远可见、不可折叠）。
@@ -19,12 +20,26 @@ export default function EvidenceList({ nodeId }: { nodeId: string }) {
   );
   const addEvidence = useAppStore((s) => s.addEvidence);
   const removeEvidence = useAppStore((s) => s.removeEvidence);
+  const nodes = useAppStore((s) => s.nodes);
+  const project = useAppStore((s) => s.project);
+  const domain = (project?.domain ?? "general") as Domain;
 
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [stance, setStance] = useState<EvidenceStance>("supports");
   const [strength, setStrength] = useState(3);
   const [note, setNote] = useState("");
+
+  // GRADE 自动建议强度（A.3.2）：按节点设计层级 + 降级情形
+  const grade = useMemo(() => {
+    const node = nodes.find((n) => n.id === nodeId);
+    return node ? suggestStrength(node, domain, "user_reasoning") : null;
+  }, [nodes, nodeId, domain]);
+
+  // 打开表单时用建议值预填
+  useEffect(() => {
+    if (adding && grade) setStrength(grade.suggested);
+  }, [adding, grade]);
 
   async function submit() {
     if (!title.trim() && !note.trim()) return;
@@ -143,6 +158,19 @@ export default function EvidenceList({ nodeId }: { nodeId: string }) {
               ),
             )}
           </div>
+          {grade && domain === "experimental" && (
+            <div className="rounded-sm border border-border bg-bg-surface px-2 py-1">
+              <p className="label-mono text-fg-tertiary">
+                GRADE 建议 {grade.suggested}（{grade.baseReason}
+                {grade.base !== grade.suggested ? `，基线 ${grade.base}` : ""}）
+              </p>
+              {grade.downgrades.length > 0 && (
+                <p className="label-mono text-contradict">
+                  降级：{grade.downgrades.join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span className="label-mono text-fg-tertiary">{t.tree.strength}</span>
             {[1, 2, 3, 4, 5].map((n) => (

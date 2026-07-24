@@ -99,7 +99,15 @@ create table if not exists library_items (
   read_status   text default 'unread',              -- unread|reading|read
   user_note     text,
   tags          text[],
-  added_at      timestamptz default now()
+  added_at      timestamptz default now(),
+
+  -- Phase 2 全文/检索字段（§6.3.4）
+  abstract      text,
+  url           text,
+  oa_pdf_url    text,
+  extracted_text text,
+  page_count    int,
+  file_hash     text
 );
 create index if not exists library_project_idx on library_items(project_id);
 
