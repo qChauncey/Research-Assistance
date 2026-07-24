@@ -82,12 +82,13 @@ export const PROVIDERS: ProviderPreset[] = [
     baseUrl: "https://api.deepseek.com",
     editableBaseUrl: false,
     keyPlaceholder: "sk-•••••••••••••••••••••••",
+    // V4：官方当前支持 deepseek-v4-pro / deepseek-v4-flash（旧的 deepseek-chat/reasoner 已下线）
     models: [
-      { id: "deepseek-chat", label: "deepseek-chat (V3)", note: "通用/快速" },
-      { id: "deepseek-reasoner", label: "deepseek-reasoner (R1)", note: "深度推理" },
+      { id: "deepseek-v4-pro", label: "deepseek-v4-pro", note: "旗舰/推理" },
+      { id: "deepseek-v4-flash", label: "deepseek-v4-flash", note: "快速/便宜" },
     ],
     allowCustomModel: true,
-    docsUrl: "https://api-docs.deepseek.com/",
+    docsUrl: "https://api-docs.deepseek.com/quick_start/pricing",
   },
   {
     id: "openrouter",
@@ -121,6 +122,38 @@ export const PROVIDERS: ProviderPreset[] = [
     ],
     allowCustomModel: true,
     docsUrl: "https://docs.siliconflow.cn/",
+  },
+  {
+    id: "moonshot",
+    label: "Kimi (Moonshot)",
+    apiStyle: "openai", // OpenAI 兼容
+    baseUrl: "https://api.moonshot.cn/v1",
+    editableBaseUrl: true, // 国际站为 https://api.moonshot.ai/v1
+    keyPlaceholder: "sk-•••••••••••••••••••••••",
+    models: [
+      { id: "kimi-k2-turbo-preview", label: "kimi-k2-turbo-preview", note: "快速" },
+      { id: "kimi-k2-0711-preview", label: "kimi-k2-0711-preview" },
+      { id: "kimi-latest", label: "kimi-latest" },
+      { id: "moonshot-v1-128k", label: "moonshot-v1-128k", note: "长上下文" },
+    ],
+    allowCustomModel: true,
+    docsUrl: "https://platform.moonshot.cn/docs/api/chat",
+    note: "国际站 base 用 https://api.moonshot.ai/v1；模型以官方文档为准",
+  },
+  {
+    id: "mimo",
+    label: "MiMo（小米）",
+    apiStyle: "openai", // OpenAI 兼容
+    baseUrl: "", // 官方端点以小米开放平台为准，请填入
+    editableBaseUrl: true,
+    keyPlaceholder: "你的 MiMo API key",
+    models: [
+      { id: "mimo-7b-rl", label: "MiMo-7B-RL", note: "推理" },
+      { id: "mimo-vl-7b-rl", label: "MiMo-VL-7B-RL", note: "多模态" },
+    ],
+    allowCustomModel: true,
+    docsUrl: "https://github.com/XiaomiMiMo/MiMo",
+    note: "MiMo 端点/模型请以官方为准，填入 Base URL 与模型 ID",
   },
   {
     id: "ollama",

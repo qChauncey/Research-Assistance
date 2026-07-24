@@ -51,13 +51,16 @@
 |---|---|---|
 | Anthropic (Claude) | anthropic (`/v1/messages`) | 模型 ID 取自官方（Opus 5 / Sonnet 5 / Haiku 4.5 / Fable 5 …） |
 | OpenAI | openai (`/chat/completions`) | GPT-5 / GPT-4.1 / o4-mini … |
-| DeepSeek | openai 兼容 | `deepseek-chat` (V3) / `deepseek-reasoner` (R1)，base `https://api.deepseek.com` |
+| DeepSeek | openai 兼容 | `deepseek-v4-pro` / `deepseek-v4-flash`，base `https://api.deepseek.com` |
 | OpenRouter | openai 兼容 | 聚合多家，模型形如 `provider/model` |
 | 硅基流动 SiliconFlow | openai 兼容 | DeepSeek / Qwen 等 |
+| Kimi (Moonshot) | openai 兼容 | `kimi-k2-*` / `moonshot-v1-*`，可编辑 Base URL（.cn / .ai） |
+| MiMo（小米） | openai 兼容 | 填入 Base URL + 模型 ID |
 | Ollama（本地） | openai 兼容 | 可编辑 Base URL |
 | 兼容端点（自定义） | openai 兼容 | 任意 OpenAI 兼容 `/chat/completions` 端点，填 Base URL + 模型 ID |
 
-- 选服务商自动带出 Base URL 与模型下拉；兼容端点/Ollama 可编辑 Base URL；任何服务商都可手填模型 ID。
+- 选服务商自动带出 Base URL 与模型下拉；兼容端点/Ollama/Kimi/MiMo 可编辑 Base URL；任何服务商都可手填模型 ID（下拉里选「自定义」）。
+- **模型字段旁挂官方文档链接**（「官方文档 ↗」），预设模型过期时可点开核对并手填最新 ID。
 - **默认模型**存入配置（发起调用的必需信息）；对话框将在 Phase 3 支持每次临时切换。
 - **测试连接**真实发一次最小请求（经服务端 `/api/llm/test` 转发，避开浏览器 CORS）。
 - 统一调用封装在 `lib/llm/chat.ts`（`callLLM`），一套接口兼容 anthropic 与 openai 两种形态，
