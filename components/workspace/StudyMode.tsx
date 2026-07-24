@@ -5,7 +5,8 @@ import { useAppStore } from "@/lib/store";
 import { parseSections, sectionPreview, type StudySection } from "@/lib/study";
 import { composeSystem, explainPassagePrompt, analyzeComparePrompt } from "@/lib/prompts";
 import { chat, NotConfiguredError } from "@/lib/llm/client";
-import type { Domain } from "@/lib/db/schema";
+import { extractPdf } from "@/lib/pdf";
+import type { Domain, FulltextStatus } from "@/lib/db/schema";
 
 /**
  * 研读模式（新增大功能）。全屏覆盖层。
@@ -24,6 +25,10 @@ export default function StudyMode() {
   const project = useAppStore((s) => s.project);
   const apiConfig = useAppStore((s) => s.apiConfig);
   const language = useAppStore((s) => s.language);
+  const updateLibraryItem = useAppStore((s) => s.updateLibraryItem);
+
+  const [fetching, setFetching] = useState(false);
+  const [fetchErr, setFetchErr] = useState<string | null>(null);
 
   const item = library.find((l) => l.id === studyItemId) ?? null;
   const domain = (project?.domain ?? "general") as Domain;
@@ -40,6 +45,37 @@ export default function StudyMode() {
   const active = sections.find((s) => s.id === activeId) ?? sections[0] ?? null;
 
   const [tab, setTab] = useState<StudyTab>("explain");
+
+  async function fetchFulltext() {
+    if (!item?.oa_pdf_url || fetching) return;
+    setFetchErr(null);
+    setFetching(true);
+    try {
+      const res = await fetch("/api/fetch-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: item.oa_pdf_url }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `抓取失败 ${res.status}`);
+      }
+      const buf = await res.arrayBuffer();
+      const file = new File([buf], "fulltext.pdf", { type: "application/pdf" });
+      const ex = await extractPdf(file);
+      await updateLibraryItem(item.id, {
+        extracted_text: ex.text,
+        page_count: ex.pageCount,
+        file_hash: ex.fileHash,
+        fulltext_status: "user_uploaded" as FulltextStatus,
+        fulltext_source: item.fulltext_source ?? "publisher_oa",
+      });
+    } catch (e) {
+      setFetchErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFetching(false);
+    }
+  }
 
   if (!studyItemId || !item) return null;
 
@@ -58,10 +94,24 @@ export default function StudyMode() {
           </div>
           <p className="label-mono mt-0.5 truncate text-fg-tertiary">
             {[item.authors?.[0], item.year, item.venue].filter(Boolean).join(" · ")}
-            {metaOnly ? " · 仅摘要（上传 PDF 获取全文分段）" : ` · ${sections.length} 个模块`}
+            {metaOnly
+              ? item.oa_pdf_url
+                ? " · 仅摘要 · 可获取全文"
+                : " · 仅摘要（无开放全文，上传 PDF 可分段）"
+              : ` · ${sections.length} 个模块`}
           </p>
+          {fetchErr && <p className="label-mono mt-0.5 text-contradict">⚠ {fetchErr}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {metaOnly && item.oa_pdf_url && (
+            <button
+              onClick={fetchFulltext}
+              disabled={fetching}
+              className="label-mono rounded-sm border border-border px-3 py-1 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary disabled:opacity-40"
+            >
+              {fetching ? "获取中…" : "⬇ 获取全文"}
+            </button>
+          )}
           {item.url && (
             <a
               href={item.url}
@@ -250,11 +300,8 @@ function StudyDialog({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              (e.metaKey || e.ctrlKey) &&
-              !e.nativeEvent.isComposing
-            ) {
+            // 回车提交；Shift+回车换行；中文输入法组字中的回车不触发
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               run();
             }
@@ -263,8 +310,8 @@ function StudyDialog({
           rows={tab === "explain" ? 3 : 2}
           placeholder={
             tab === "explain"
-              ? "把看不懂的原文段落粘贴到这里…（⌘/Ctrl + ↵ 提交）"
-              : "可选：聚焦某个论点/维度再对比（留空则对比核心论点）…（⌘/Ctrl + ↵ 提交）"
+              ? "把看不懂的原文段落粘贴到这里…（↵ 提交 · ⇧↵ 换行）"
+              : "可选：聚焦某个论点/维度再对比（留空则对比核心论点）…（↵ 提交 · ⇧↵ 换行）"
           }
           className="w-full resize-none rounded-sm border border-border bg-bg-void px-3 py-2 text-sm text-fg-primary outline-none placeholder:text-fg-tertiary"
         />

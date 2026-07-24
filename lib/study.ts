@@ -135,8 +135,66 @@ function sid(): string {
   return `sec_${counter++}`;
 }
 
+/** 取一段文字的前若干字做标题（段落回退时用）。 */
+function shortTitle(body: string, max = 42): string {
+  const s = body.replace(/\s+/g, " ").trim();
+  return s.length > max ? s.slice(0, max) + "…" : s || "（空）";
+}
+
 /**
- * 把全文切成章节。识别不到任何标题时，返回单段「全文」。
+ * 段落回退：识别不到章节标题时，把整篇切成若干「段落」模块，
+ * 保证左栏有多个模块可点、右栏总有原文可看。
+ * 优先按空行分段；没有空行（pdf.js 常把全文挤成少数长行）时按句子分块。
+ */
+function paragraphFallback(clean: string): StudySection[] {
+  // 1) 先按空行切
+  let paras = clean
+    .split(/\n\s*\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  // 2) 空行分段太少 → 按句子聚合成 ~700 字的块
+  if (paras.length < 2) {
+    const sentences = clean
+      .replace(/\s+/g, " ")
+      .match(/[^.!?。！？]+[.!?。！？]+|\S[^.!?。！？]*$/g) ?? [clean];
+    const chunks: string[] = [];
+    let buf = "";
+    for (const s of sentences) {
+      buf += s;
+      if (buf.length >= 700) {
+        chunks.push(buf.trim());
+        buf = "";
+      }
+    }
+    if (buf.trim()) chunks.push(buf.trim());
+    paras = chunks.length ? chunks : [clean];
+  }
+
+  // 合并过短的碎片到上一段，避免出现一堆一句话模块
+  const merged: string[] = [];
+  for (const p of paras) {
+    if (merged.length && p.length < 120) {
+      merged[merged.length - 1] += "\n\n" + p;
+    } else {
+      merged.push(p);
+    }
+  }
+
+  if (merged.length < 2) {
+    return [{ id: sid(), title: "全文", body: clean, level: 0 }];
+  }
+  return merged.map((body, i) => ({
+    id: sid(),
+    title: `段落 ${i + 1} · ${shortTitle(body, 28)}`,
+    body,
+    level: 0,
+  }));
+}
+
+/**
+ * 把全文切成章节。优先按学术章节标题分段；识别不到时回退为段落分段，
+ * 始终返回至少一段（非空文本）。
  */
 export function parseSections(text: string): StudySection[] {
   const clean = (text ?? "").replace(/\r\n?/g, "\n").trim();
@@ -145,7 +203,7 @@ export function parseSections(text: string): StudySection[] {
   const lines = clean.split("\n");
   const sections: StudySection[] = [];
   let current: StudySection | null = null;
-  let preamble: string[] = [];
+  const preamble: string[] = [];
 
   for (const rawLine of lines) {
     const h = detectHeading(rawLine);
@@ -160,22 +218,20 @@ export function parseSections(text: string): StudySection[] {
   }
   if (current) sections.push(current);
 
+  // 丢弃正文为空的标题段（提取噪声）
+  const withBody = sections.filter((s) => s.body.trim().length > 0);
+
   // 首个标题前的内容 → 作为「开头」段（通常含标题/作者/摘要）
   const pre = preamble.join("\n").trim();
   if (pre) {
-    sections.unshift({ id: sid(), title: "开头", body: pre, level: 0 });
+    withBody.unshift({ id: sid(), title: "开头", body: pre, level: 0 });
   }
 
-  // 没识别到任何标题 → 整篇一段
-  if (sections.length === 0) {
-    return [{ id: sid(), title: "全文", body: clean, level: 0 }];
-  }
-  // 只有一个「开头」段且没有真正章节 → 更名为全文
-  if (sections.length === 1 && sections[0].title === "开头") {
-    sections[0].title = "全文";
-  }
-  // 丢弃正文为空的标题段（提取噪声）
-  return sections.filter((s) => s.body.trim().length > 0 || s.title === "全文");
+  // 识别到 ≥2 个真正的章节 → 用它
+  if (withBody.length >= 2) return withBody;
+
+  // 否则回退到段落分段（保证多模块 + 右栏有原文）
+  return paragraphFallback(clean);
 }
 
 /** 章节正文的简短预览（左栏概览用）。 */

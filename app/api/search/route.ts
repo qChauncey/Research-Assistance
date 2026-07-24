@@ -24,7 +24,9 @@ export async function POST(req: NextRequest) {
   }
 
   const sources: SearchSource[] =
-    body.sources && body.sources.length ? body.sources : ["openalex", "arxiv"];
+    body.sources && body.sources.length
+      ? body.sources
+      : ["openalex", "semanticscholar", "arxiv"];
   const perSource = Math.min(Math.max(body.perSource ?? 10, 1), 25);
 
   const result = await runSearch(query, sources, perSource);
