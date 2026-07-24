@@ -127,47 +127,68 @@ export default function StepApiConfig({
             </Field>
           )}
 
-          {/* 模型 */}
-          <Field
-            label="模型"
-            hint={
-              provider.docsUrl
-                ? `模型列表可能随官方更新，核对：${provider.docsUrl}`
-                : undefined
-            }
-          >
+          {/* 模型 —— 标签旁挂官方文档链接；可随时切自定义手填最新模型 ID */}
+          <div className="block space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="label-mono text-fg-secondary">模型</span>
+              {provider.docsUrl && (
+                <a
+                  href={provider.docsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="label-mono text-fg-tertiary hover:text-fg-primary"
+                >
+                  官方文档 ↗
+                </a>
+              )}
+            </div>
+
             {modelOptions.length > 0 && !customModel ? (
-              <div className="space-y-2">
-                <select
+              <select
+                value={local.model ?? ""}
+                onChange={(e) => {
+                  if (e.target.value === "__custom__") {
+                    setCustomModel(true);
+                    update({ model: "" });
+                  } else {
+                    update({ model: e.target.value });
+                  }
+                }}
+                className="w-full rounded-sm border border-border bg-bg-void px-3 py-2 text-sm text-fg-primary outline-none focus:border-border-focus"
+              >
+                {modelOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.note ? ` · ${m.note}` : ""}
+                  </option>
+                ))}
+                {provider.allowCustomModel && (
+                  <option value="__custom__">自定义（手填模型 ID）…</option>
+                )}
+              </select>
+            ) : (
+              <div className="space-y-1">
+                <Input
                   value={local.model ?? ""}
                   onChange={(e) => update({ model: e.target.value })}
-                  className="w-full rounded-sm border border-border bg-bg-void px-3 py-2 text-sm text-fg-primary outline-none focus:border-border-focus"
-                >
-                  {modelOptions.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                      {m.note ? ` · ${m.note}` : ""}
-                    </option>
-                  ))}
-                </select>
-                {provider.allowCustomModel && (
+                  placeholder="模型 ID，如 deepseek-v4-pro / kimi-latest / claude-opus-5"
+                  autoFocus
+                />
+                {modelOptions.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => setCustomModel(true)}
+                    onClick={() => setCustomModel(false)}
                     className="label-mono text-fg-tertiary hover:text-fg-primary"
                   >
-                    + 手填模型 ID
+                    ← 返回预设
                   </button>
                 )}
               </div>
-            ) : (
-              <Input
-                value={local.model ?? ""}
-                onChange={(e) => update({ model: e.target.value })}
-                placeholder="模型 ID，如 deepseek-chat / gpt-5 / claude-opus-5"
-              />
             )}
-          </Field>
+            <span className="block text-xs text-fg-tertiary">
+              预设模型可能随官方更新变化；点右上「官方文档」核对，或选「自定义」手填最新模型 ID。
+            </span>
+          </div>
 
           {/* API Key */}
           <Field label={t.onboarding.apiKey}>
