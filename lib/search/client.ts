@@ -11,7 +11,7 @@ import type { LibraryItem } from "@/lib/db/schema";
 
 export async function searchExternal(
   query: string,
-  sources: SearchSource[] = ["openalex", "arxiv"],
+  sources: SearchSource[] = ["openalex", "semanticscholar", "arxiv"],
 ): Promise<SearchResponse> {
   const res = await fetch("/api/search", {
     method: "POST",

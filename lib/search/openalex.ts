@@ -21,8 +21,10 @@ interface OAWork {
   doi?: string;
   title?: string;
   display_name?: string;
+  type?: string;
   publication_year?: number;
   cited_by_count?: number;
+  is_retracted?: boolean;
   authorships?: OAAuthorship[];
   primary_location?: OALocation;
   best_oa_location?: OALocation;
@@ -60,6 +62,8 @@ export async function searchOpenAlex(
   url.searchParams.set("search", query);
   url.searchParams.set("per-page", String(perPage));
   url.searchParams.set("mailto", MAILTO);
+  // 质量过滤：剔除副文本（书评/勘误等噪声）与已撤稿论文（issue 4：低质结果下沉）
+  url.searchParams.set("filter", "is_paratext:false,is_retracted:false");
 
   const res = await fetch(url.toString(), {
     headers: { "User-Agent": `ArgumentTree/1.0 (mailto:${MAILTO})` },
@@ -87,6 +91,8 @@ export async function searchOpenAlex(
         w.primary_location?.landing_page_url ??
         (w.doi ? `https://doi.org/${cleanDoi(w.doi)}` : undefined),
       oa_pdf_url: oa?.pdf_url,
+      pub_type: w.type,
+      retracted: w.is_retracted,
       score: 1 - i * 0.01, // 保序权重
     };
   });
