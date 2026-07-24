@@ -172,11 +172,19 @@ export interface LibraryItem {
   file_hash?: string;
 }
 
-/** API 配置（BYOK）—— Phase 1 只存不用（约束/§6.1 步骤 2）。 */
+/**
+ * API 配置（BYOK）。Phase 3 接 LLM 调用时使用；多服务商兼容（见 lib/providers.ts）。
+ * provider 为服务商预设 id（anthropic/openai/deepseek/openrouter/siliconflow/ollama/compatible）。
+ */
 export interface ApiConfig {
-  provider: "anthropic" | "openai" | "compatible" | null;
+  /** 服务商预设 id；null 表示未配置 */
+  provider: string | null;
   apiKey: string;
-  /** 仅本设备浏览器 | 加密同步（Phase 1 一律本地） */
+  /** 覆盖 base URL（兼容端点/自建代理/Ollama）；空则用预设默认 */
+  baseUrl?: string;
+  /** 选定的模型 ID（默认调用用；对话框可临时切换） */
+  model?: string;
+  /** 仅本设备浏览器 | 加密同步 */
   storage: "local" | "encrypted_sync";
   tested: boolean;
 }

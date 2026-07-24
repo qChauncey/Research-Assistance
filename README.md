@@ -14,7 +14,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 四步引导流程 | 登录/离线入口 · API 配置（BYOK，只存不用）· 研究类型 · 语言（界面/AI/论文三合一 + 独立检索语言） |
+| 四步引导流程 | 登录/离线入口 · API 配置（BYOK，多服务商）· 研究类型 · 语言（界面/AI/论文三合一 + 独立检索语言） |
 | 三栏工作区 | 左（文献库）· 中（叙述 + 对话框外壳）· 右（逻辑树），响应式折叠 |
 | 逻辑树 CRUD | React Flow + dagre：拖拽移动、拖到另一节点上改父子关系、增删改、双击编辑面板 |
 | 四套领域配置 | general / physics / experimental / social，节点类型枚举全部由配置驱动 |
@@ -42,6 +42,31 @@
 
 > 依赖外部网络的部分（OpenAlex/arXiv 检索、pgvector 嵌入）在受限沙箱中被拦截，需在
 > Vercel 等开放网络验证；PDF 提取、GRADE、本地库检索为纯客户端，已本地端到端验证。
+
+## Phase 3 地基：多服务商 BYOK 配置
+
+引导第 2 步的 API 配置支持大部分模型与服务商（`lib/providers.ts`）：
+
+| 服务商 | API 形态 | 说明 |
+|---|---|---|
+| Anthropic (Claude) | anthropic (`/v1/messages`) | 模型 ID 取自官方（Opus 5 / Sonnet 5 / Haiku 4.5 / Fable 5 …） |
+| OpenAI | openai (`/chat/completions`) | GPT-5 / GPT-4.1 / o4-mini … |
+| DeepSeek | openai 兼容 | `deepseek-chat` (V3) / `deepseek-reasoner` (R1)，base `https://api.deepseek.com` |
+| OpenRouter | openai 兼容 | 聚合多家，模型形如 `provider/model` |
+| 硅基流动 SiliconFlow | openai 兼容 | DeepSeek / Qwen 等 |
+| Ollama（本地） | openai 兼容 | 可编辑 Base URL |
+| 兼容端点（自定义） | openai 兼容 | 任意 OpenAI 兼容 `/chat/completions` 端点，填 Base URL + 模型 ID |
+
+- 选服务商自动带出 Base URL 与模型下拉；兼容端点/Ollama 可编辑 Base URL；任何服务商都可手填模型 ID。
+- **默认模型**存入配置（发起调用的必需信息）；对话框将在 Phase 3 支持每次临时切换。
+- **测试连接**真实发一次最小请求（经服务端 `/api/llm/test` 转发，避开浏览器 CORS）。
+- 统一调用封装在 `lib/llm/chat.ts`（`callLLM`），一套接口兼容 anthropic 与 openai 两种形态，
+  遵循 §1.1 方案 A（服务端转发、不落盘、不记录 body、key 用完即弃）——这是 Phase 3 五种对话
+  调用类型的地基。
+- 模型列表为"已知当前值"的种子，可能随各服务商更新变化；每个服务商附官方文档链接供核对。
+
+> Phase 3 的其余部分（对话框五种调用类型、红队结构检查+领域序列、候选区判死/采纳、
+> 新颖性检索）尚未实现。
 
 ## 技术栈
 
