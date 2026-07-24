@@ -45,7 +45,7 @@ export default function LeftPanel() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [peerOnly, setPeerOnly] = useState(true);
+  const [peerOnly, setPeerOnly] = useState(false);
   // 跨语言检索：检索词被翻译成检索语言时的提示
   const [translatedQuery, setTranslatedQuery] = useState<string | null>(null);
   // 结果翻译（阅读辅助）：按结果键存译文
@@ -104,7 +104,12 @@ export default function LeftPanel() {
           /* 翻译失败则退回原检索词 */
         }
       }
-      const resp = await searchExternal(searchQ);
+      let resp = await searchExternal(searchQ);
+      // 翻译后的检索词若一无所获，退回原检索词再试一次（避免翻译偏差导致"搜不到"）
+      if (resp.results.length === 0 && searchQ !== q) {
+        setTranslatedQuery(null);
+        resp = await searchExternal(q);
+      }
       setResults(resp.results);
       if (resp.errors.length && resp.results.length === 0) {
         setSearchErr(resp.errors.map((e) => `${e.source}: ${e.message}`).join(" · "));

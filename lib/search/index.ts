@@ -51,9 +51,11 @@ function hostOf(r: SearchResult): string {
   return "";
 }
 
-/** 是否同行评审：有正式出处（venue）且非预印本/开放仓库/数据集。供"仅同行评审"过滤用。 */
+/** 是否同行评审：有正式出处（venue 或 DOI）且非预印本/开放仓库/数据集。供"仅同行评审"过滤用。
+ *  用 venue 或 DOI 两者之一，避免 OpenAlex/S2 偶尔缺 venue 字段时把正规期刊论文误隐藏。 */
 export function isPeerReviewed(r: SearchResult): boolean {
-  return !!(r.venue && r.venue.trim()) && !isNonPeerReviewed(r);
+  const hasOutlet = !!(r.venue && r.venue.trim()) || !!r.doi;
+  return hasOutlet && !isNonPeerReviewed(r);
 }
 
 function isNonPeerReviewed(r: SearchResult): boolean {
