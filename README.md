@@ -90,7 +90,25 @@
 
 > 依赖真实 LLM 调用的部分（自由对话、红队第 2 步、发散、对比、建节点）需在配好 key 的
 > Vercel 环境验证；结构检查、候选区判死/采纳为纯客户端，已本地验证。
-> 新颖性检索（发散候选自动跑 OpenAlex 查重）、正式论文模式为后续。
+
+## Phase 4 已实现：论文模式 · 清单导出 · 方法论健康度（§6.4 / §5.2 G / A.3.1）
+
+Phase 4 全为纯客户端，已本地端到端验证。
+
+| 项 | 说明 |
+|---|---|
+| 叙述模式完整版 | `@ 节点引用` / `[[ 文献引用` 插入 token；同步指示器（树变化后提示"N 处引用可能过时"） |
+| 正式论文模式 | 按研究类型套骨架（general/physics/experimental/social），从树快照式填充 |
+| 树→论文映射 | 根命题→论点、hard_core→核心主张、assumption→假设章节、derivation/mechanism→方法、falsifier→可检验预测、scope→适用边界 |
+| 反证据强制进 Limitations | `contradicts` 证据自动进 Limitations，删除需主动操作（默认值方向决定行为） |
+| 未填 falsifier 标黄 | 草稿中标「⚠ 此处缺可证伪条件」，LaTeX 里标 `[MISSING FALSIFIER]` |
+| 导出 | Markdown · LaTeX（物理 revtex4-2 / 其余 article）· BibTeX（从证据）|
+| 报告规范清单导出 | 实验科学按研究设计加载 CONSORT-2025 / PRISMA-2020 / ARRIVE-2.0 / STROBE，映射完成度，导出 Markdown 清单 |
+| 方法论健康度全表 | 不可证伪节点 · 单一假设(Platt) · 未论证识别假设(社科) · 越界近似(物理) · 未验证外推(实验) · 退化纲领(Lakatos)；≥80% 弹「该找人评审了」 |
+
+> 报告规范清单内置的是各标准的**代表性条目子集**（结构正确的骨架），正式投稿以
+> equator-network.org 官方最新版为准。docx 导出、双向同步为后续。
+> 新颖性检索（发散候选自动跑 OpenAlex 查重）也可补。
 
 ## 技术栈
 

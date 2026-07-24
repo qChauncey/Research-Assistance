@@ -121,3 +121,118 @@ export function isLowContradictionCoverage(m: MaturityMetrics): boolean {
   if (m.contradictedNodes.total === 0) return false;
   return m.contradictedNodes.count / m.contradictedNodes.total < 0.2;
 }
+
+/**
+ * 方法论健康度全表（§5.2 G 下半 · A.5.2）。领域相关：只在适用领域计相应指标。
+ */
+export interface MethodologyHealth {
+  /** 不可证伪节点：分母只计 empiricalClaim 节点（A.5.2） */
+  unfalsifiable: { count: number; empiricalTotal: number };
+  /** 单一假设节点（Platt）：解释性节点只有一个候选假设 */
+  singleHypothesis: number;
+  /** 未论证的识别假设（社科专有）：identification_assumption 仍为 open */
+  unjustifiedIdentification: number;
+  /** 越界使用的近似（物理专有）：approximation 缺 validity_range */
+  approxOutOfRange: number;
+  /** 未验证的外推跨越（实验科学专有）：extrapolation 节点数 */
+  extrapolationGaps: number;
+  /** 退化纲领信号（Lakatos）：hard_core 下有保护带修订但无新预测 */
+  degeneratingProgram: number;
+  /** 是否有清单绑定（实验科学 + 已选设计） */
+  hasChecklist: boolean;
+  /** 综合健康分 0..100（用于头部与 80% 提示） */
+  score: number;
+}
+
+function strField(v: unknown): string {
+  return typeof v === "string" ? v.trim() : v == null ? "" : String(v);
+}
+
+export function computeMethodologyHealth(
+  nodes: ArgNode[],
+  domain: Domain,
+): MethodologyHealth {
+  const empiricalNodes = nodes.filter((n) => isEmpirical(n, domain));
+  const unfalsifiable = empiricalNodes.filter(
+    (n) => !n.falsifier || n.falsifier.trim() === "",
+  ).length;
+
+  // 单一假设（Platt）：某节点的假设型子节点恰好只有 1 个
+  let singleHypothesis = 0;
+  for (const n of nodes) {
+    const assumptionChildren = nodes.filter(
+      (c) => c.parent_id === n.id && isAssumption(c, domain),
+    );
+    if (assumptionChildren.length === 1) singleHypothesis++;
+  }
+
+  const unjustifiedIdentification =
+    domain === "social"
+      ? nodes.filter(
+          (n) => n.node_type === "identification_assumption" && n.status === "open",
+        ).length
+      : 0;
+
+  const approxOutOfRange =
+    domain === "physics"
+      ? nodes.filter(
+          (n) =>
+            n.node_type === "approximation" &&
+            !strField(n.domain_fields?.validity_range),
+        ).length
+      : 0;
+
+  const extrapolationGaps =
+    domain === "experimental"
+      ? nodes.filter((n) => n.node_type === "extrapolation").length
+      : 0;
+
+  // 退化纲领：hard_core 节点，其子树含 protective_belt 但无 novel_prediction
+  let degeneratingProgram = 0;
+  const byParent = new Map<string, ArgNode[]>();
+  for (const n of nodes) {
+    const arr = byParent.get(n.parent_id ?? "") ?? [];
+    arr.push(n);
+    byParent.set(n.parent_id ?? "", arr);
+  }
+  function descendants(id: string): ArgNode[] {
+    const out: ArgNode[] = [];
+    const stack = [...(byParent.get(id) ?? [])];
+    while (stack.length) {
+      const c = stack.pop()!;
+      out.push(c);
+      stack.push(...(byParent.get(c.id) ?? []));
+    }
+    return out;
+  }
+  for (const n of nodes) {
+    if (n.program_role === "hard_core") {
+      const desc = descendants(n.id);
+      const belts = desc.filter((d) => d.program_role === "protective_belt").length;
+      const novels = desc.filter((d) => d.program_role === "novel_prediction").length;
+      if (belts >= 3 && novels === 0) degeneratingProgram++;
+    }
+  }
+
+  // 综合健康分：以"审查是否发生"为主，问题越多分越低（诚实标注不惩罚）
+  const problems =
+    unfalsifiable +
+    singleHypothesis +
+    unjustifiedIdentification +
+    approxOutOfRange +
+    extrapolationGaps +
+    degeneratingProgram;
+  const denom = Math.max(nodes.length, 1);
+  const score = Math.max(0, Math.round(100 * (1 - problems / (denom * 1.5))));
+
+  return {
+    unfalsifiable: { count: unfalsifiable, empiricalTotal: empiricalNodes.length },
+    singleHypothesis,
+    unjustifiedIdentification,
+    approxOutOfRange,
+    extrapolationGaps,
+    degeneratingProgram,
+    hasChecklist: domain === "experimental",
+    score,
+  };
+}
