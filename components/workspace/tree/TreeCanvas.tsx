@@ -38,6 +38,7 @@ function TreeCanvasInner({ onEditNode }: { onEditNode: (id: string) => void }) {
   const reparentNode = useAppStore((s) => s.reparentNode);
   const applyLayout = useAppStore((s) => s.applyLayout);
   const addNode = useAppStore((s) => s.addNode);
+  const requestRedTeam = useAppStore((s) => s.requestRedTeam);
   const { fitView } = useReactFlow();
 
   const domain = (project?.domain ?? "general") as Domain;
@@ -184,9 +185,10 @@ function TreeCanvasInner({ onEditNode }: { onEditNode: (id: string) => void }) {
             ⊕ {t.tree.addNode}
           </button>
           <button
-            disabled
-            title={t.workspace.phase3Note}
-            className="label-mono cursor-not-allowed rounded-sm px-2 py-1 text-fg-tertiary opacity-50"
+            onClick={() => selectedNodeId && requestRedTeam(selectedNodeId)}
+            disabled={!selectedNodeId}
+            title={selectedNodeId ? "对选中节点执行红队（中栏对话框）" : "先选中一个节点"}
+            className="label-mono rounded-sm px-2 py-1 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
             ⚔ {t.tree.redTeam}
           </button>
