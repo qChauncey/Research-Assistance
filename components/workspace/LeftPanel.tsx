@@ -27,6 +27,7 @@ export default function LeftPanel() {
   const addLibraryItem = useAppStore((s) => s.addLibraryItem);
   const updateLibraryItem = useAppStore((s) => s.updateLibraryItem);
   const removeLibraryItem = useAppStore((s) => s.removeLibraryItem);
+  const openStudy = useAppStore((s) => s.openStudy);
 
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"library" | "search">("library");
@@ -79,6 +80,12 @@ export default function LeftPanel() {
 
   async function addResultToLibrary(r: SearchResult) {
     await addLibraryItem(resultToLibraryItem(r));
+  }
+
+  // 从检索结果直接研读：先入库拿到 id，再打开研读
+  async function studyResult(r: SearchResult) {
+    const item = await addLibraryItem(resultToLibraryItem(r));
+    openStudy(item.id);
   }
 
   // —— PDF 上传：提取全文 + 元数据，归档为 user_uploaded ——
@@ -240,6 +247,16 @@ export default function LeftPanel() {
                           />
                         </label>
                       )}
+                      {l.url && (
+                        <a
+                          href={l.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="label-mono text-fg-secondary hover:text-fg-primary"
+                        >
+                          ↗ 链接
+                        </a>
+                      )}
                       {l.oa_pdf_url && (
                         <a
                           href={l.oa_pdf_url}
@@ -249,6 +266,14 @@ export default function LeftPanel() {
                         >
                           ↗ 原文
                         </a>
+                      )}
+                      {(l.extracted_text || l.abstract) && (
+                        <button
+                          onClick={() => openStudy(l.id)}
+                          className="label-mono text-fg-secondary hover:text-fg-primary"
+                        >
+                          ▤ 研读
+                        </button>
                       )}
                       <MountControl libItemId={l.id} />
                       <button
@@ -299,6 +324,7 @@ export default function LeftPanel() {
               key={`${r.doi ?? r.openalex_id ?? r.arxiv_id ?? i}`}
               r={r}
               onAdd={() => addResultToLibrary(r)}
+              onStudy={() => studyResult(r)}
               domain={domain}
               selectedNodeId={selectedNodeId}
             />
@@ -336,11 +362,13 @@ export default function LeftPanel() {
 function ResultCard({
   r,
   onAdd,
+  onStudy,
   domain,
   selectedNodeId,
 }: {
   r: SearchResult;
   onAdd: () => void;
+  onStudy: () => void;
   domain: Domain;
   selectedNodeId: string | null;
 }) {
@@ -392,6 +420,22 @@ function ResultCard({
           className="label-mono rounded-sm border border-border px-2 py-0.5 text-fg-secondary hover:bg-bg-hover disabled:opacity-40"
         >
           {added ? "✓ 已加入库" : "＋ 加入库"}
+        </button>
+        {r.url && (
+          <a
+            href={r.url}
+            target="_blank"
+            rel="noreferrer"
+            className="label-mono rounded-sm border border-border px-2 py-0.5 text-fg-secondary hover:bg-bg-hover"
+          >
+            ↗ 链接
+          </a>
+        )}
+        <button
+          onClick={onStudy}
+          className="label-mono rounded-sm border border-border px-2 py-0.5 text-fg-secondary hover:bg-bg-hover"
+        >
+          ▤ 研读
         </button>
         {selectedNodeId ? (
           <span className="flex items-center gap-1">

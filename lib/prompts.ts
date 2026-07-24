@@ -115,6 +115,59 @@ export function comparePrompt(nodeCtx: string, othersText: string): string {
   ].join("\n");
 }
 
+/** 研读·「什么是…？」：解释用户从原文里选取/粘贴的一段（自由文本输出，非 JSON）。 */
+export function explainPassagePrompt(
+  paperTitle: string,
+  passage: string,
+  sectionTitle?: string,
+): string {
+  return [
+    `阅读理解任务：用户正在研读论文《${paperTitle || "未命名"}》${
+      sectionTitle ? `（${sectionTitle} 部分）` : ""
+    }，选取了下面这段原文，请帮他读懂它。要求：`,
+    `- 用通俗但准确的语言说清这段在讲什么；`,
+    `- 点出其中的关键术语、假设、方法或结论（术语首次出现保留英文原文）；`,
+    `- 若这段涉及可证伪的经验命题，指出它的证伪条件是什么；`,
+    `- 不确定或原文没说清的地方，直接说不确定，绝不编造。`,
+    ``,
+    `原文：`,
+    `"""`,
+    passage,
+    `"""`,
+  ].join("\n");
+}
+
+/** 研读·「分析」：把本论文与库中其它相关论文做对比分析（自由文本输出，非 JSON）。 */
+export function analyzeComparePrompt(
+  paperTitle: string,
+  paperSummary: string,
+  others: { title: string; abstract?: string }[],
+  focus?: string,
+): string {
+  const othersText =
+    others.length === 0
+      ? "（文献库中暂无其它论文可对比）"
+      : others
+          .map(
+            (o, i) =>
+              `[${i + 1}] ${o.title}\n摘要：${o.abstract?.trim() || "（无摘要）"}`,
+          )
+          .join("\n\n");
+  return [
+    `对比分析任务：用户正在研读论文《${paperTitle || "未命名"}》。请围绕${
+      focus?.trim() ? `「${focus.trim()}」` : "该论文的核心论点"
+    }，把它与文献库中其它相关论文做对比。`,
+    `客观归纳：共识在哪、分歧在哪（真正的分歧点最有价值）、各自独特的贡献或盲点。`,
+    `只依据给出的材料；材料不足以判断处，明说不足，不要脑补论文里没有的内容。`,
+    ``,
+    `本论文：`,
+    paperSummary || "（仅有标题）",
+    ``,
+    `其它论文：`,
+    othersText,
+  ].join("\n");
+}
+
 /** ⊕ 建节点：把对话结论转成节点草案（进候选区待确认）。 */
 export function makeNodePrompt(conversation: string, domain: Domain): string {
   const d = getDomain(domain);

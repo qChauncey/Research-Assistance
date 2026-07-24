@@ -82,6 +82,8 @@ interface AppState {
   pendingSearch: string | null;
   /** 跨栏红队请求：右栏树工具栏点「红队」→ 中栏对话框接住并执行（节点 id） */
   pendingRedTeam: string | null;
+  /** 研读模式：正在研读的文献库条目 id（null 关闭） */
+  studyItemId: string | null;
 
   // —— 生命周期 ——
   init: () => Promise<void>;
@@ -132,6 +134,8 @@ interface AppState {
   clearPendingSearch: () => void;
   requestRedTeam: (nodeId: string) => void;
   clearPendingRedTeam: () => void;
+  openStudy: (libItemId: string) => void;
+  closeStudy: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -149,6 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedNodeId: null,
   pendingSearch: null,
   pendingRedTeam: null,
+  studyItemId: null,
 
   init: async () => {
     const [apiConfig, language, onboarded, activeProjectId, userId, userEmail] =
@@ -441,6 +446,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearPendingSearch: () => set({ pendingSearch: null }),
   requestRedTeam: (nodeId) => set({ pendingRedTeam: nodeId, selectedNodeId: nodeId }),
   clearPendingRedTeam: () => set({ pendingRedTeam: null }),
+  openStudy: (libItemId) => set({ studyItemId: libItemId }),
+  closeStudy: () => set({ studyItemId: null }),
 }));
 
 /** 便捷：当前项目的领域配置。 */
