@@ -12,6 +12,13 @@ import {
   resultToLibraryItem,
 } from "@/lib/search/client";
 import { isPeerReviewed } from "@/lib/search";
+import {
+  hasCJK,
+  isCJKLang,
+  langName,
+  translateQuery,
+  translateResults,
+} from "@/lib/translate";
 import { extractPdf } from "@/lib/pdf";
 import { suggestStrength } from "@/lib/grade";
 
@@ -29,6 +36,8 @@ export default function LeftPanel() {
   const updateLibraryItem = useAppStore((s) => s.updateLibraryItem);
   const removeLibraryItem = useAppStore((s) => s.removeLibraryItem);
   const openStudy = useAppStore((s) => s.openStudy);
+  const apiConfig = useAppStore((s) => s.apiConfig);
+  const language = useAppStore((s) => s.language);
 
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"library" | "search">("library");
@@ -37,6 +46,12 @@ export default function LeftPanel() {
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [peerOnly, setPeerOnly] = useState(true);
+  // 跨语言检索：检索词被翻译成检索语言时的提示
+  const [translatedQuery, setTranslatedQuery] = useState<string | null>(null);
+  // 结果翻译（阅读辅助）：按结果键存译文
+  const [trans, setTrans] = useState<Record<string, { title: string; abstract?: string }>>({});
+  const [showTrans, setShowTrans] = useState(false);
+  const [translatingResults, setTranslatingResults] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const domain = (project?.domain ?? "general") as Domain;
@@ -71,8 +86,25 @@ export default function LeftPanel() {
     setBusy(true);
     setSearchErr(null);
     setResults([]);
+    setTrans({});
+    setShowTrans(false);
+    setTranslatedQuery(null);
     try {
-      const resp = await searchExternal(q);
+      // 跨语言检索：检索词与检索语言脚本不一致时，先翻译成检索语言（学术库以英文为主）
+      let searchQ = q;
+      const searchLang = language?.search ?? "en";
+      if (apiConfig?.model && hasCJK(q) !== isCJKLang(searchLang)) {
+        try {
+          const t = await translateQuery(apiConfig, q, langName(searchLang));
+          if (t) {
+            searchQ = t;
+            setTranslatedQuery(t);
+          }
+        } catch {
+          /* 翻译失败则退回原检索词 */
+        }
+      }
+      const resp = await searchExternal(searchQ);
       setResults(resp.results);
       if (resp.errors.length && resp.results.length === 0) {
         setSearchErr(resp.errors.map((e) => `${e.source}: ${e.message}`).join(" · "));
@@ -84,6 +116,34 @@ export default function LeftPanel() {
     }
   }
   const runSearch = () => runSearchWith(query);
+
+  // 结果键（用于映射译文；优先稳定标识，退回标题）
+  const resultKey = (r: SearchResult) =>
+    r.doi ?? r.openalex_id ?? r.arxiv_id ?? r.title;
+
+  // 把当前可见结果翻译成界面语言（阅读辅助；原文标题保留）
+  async function translateVisible() {
+    if (!apiConfig?.model || translatingResults || visibleResults.length === 0) return;
+    setTranslatingResults(true);
+    try {
+      const uiName = langName(language?.ui ?? "zh-CN");
+      const map = await translateResults(
+        apiConfig,
+        visibleResults.map((r) => ({ title: r.title, abstract: r.abstract })),
+        uiName,
+      );
+      const byKey: Record<string, { title: string; abstract?: string }> = { ...trans };
+      visibleResults.forEach((r, i) => {
+        if (map[i]) byKey[resultKey(r)] = map[i];
+      });
+      setTrans(byKey);
+      setShowTrans(true);
+    } catch (e) {
+      setSearchErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTranslatingResults(false);
+    }
+  }
 
   async function addResultToLibrary(r: SearchResult) {
     await addLibraryItem(resultToLibraryItem(r));
@@ -321,26 +381,60 @@ export default function LeftPanel() {
             </div>
           )}
 
+          {translatedQuery && (
+            <p className="label-mono px-3 pt-1.5 text-fg-tertiary">
+              跨语言检索 · 检索词已译：「{translatedQuery}」
+            </p>
+          )}
           {results.length > 0 && (
-            <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5">
               <span className="label-mono text-fg-tertiary">
                 外部检索 {peerOnly ? visibleResults.length : results.length}
               </span>
-              <button
-                onClick={() => setPeerOnly((v) => !v)}
-                title={
-                  peerOnly
-                    ? "仅显示同行评审文献（点开可含预印本/开放仓库）"
-                    : "含预印本/开放仓库（点开只看同行评审）"
-                }
-                className={`label-mono rounded-sm border px-2 py-0.5 ${
-                  peerOnly
-                    ? "border-border bg-bg-raised text-fg-primary"
-                    : "border-border text-fg-tertiary hover:text-fg-secondary"
-                }`}
-              >
-                {peerOnly ? "✓ 仅同行评审" : "含预印本"}
-              </button>
+              <div className="flex items-center gap-1">
+                {Object.keys(trans).length > 0 ? (
+                  <button
+                    onClick={() => setShowTrans((v) => !v)}
+                    className={`label-mono rounded-sm border px-2 py-0.5 ${
+                      showTrans
+                        ? "border-border bg-bg-raised text-fg-primary"
+                        : "border-border text-fg-tertiary hover:text-fg-secondary"
+                    }`}
+                  >
+                    {showTrans ? "✓ 译文" : "原文"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={translateVisible}
+                    disabled={translatingResults || !apiConfig?.model}
+                    title={
+                      apiConfig?.model
+                        ? "把标题/摘要译成界面语言（原文标题保留，引用不受影响）"
+                        : "需先配置模型"
+                    }
+                    className="label-mono rounded-sm border border-border px-2 py-0.5 text-fg-tertiary hover:text-fg-secondary disabled:opacity-40"
+                  >
+                    {translatingResults
+                      ? "翻译中…"
+                      : `译成${langName(language?.ui ?? "zh-CN")}`}
+                  </button>
+                )}
+                <button
+                  onClick={() => setPeerOnly((v) => !v)}
+                  title={
+                    peerOnly
+                      ? "仅显示同行评审文献（点开可含预印本/开放仓库）"
+                      : "含预印本/开放仓库（点开只看同行评审）"
+                  }
+                  className={`label-mono rounded-sm border px-2 py-0.5 ${
+                    peerOnly
+                      ? "border-border bg-bg-raised text-fg-primary"
+                      : "border-border text-fg-tertiary hover:text-fg-secondary"
+                  }`}
+                >
+                  {peerOnly ? "✓ 仅同行评审" : "含预印本"}
+                </button>
+              </div>
             </div>
           )}
           {peerOnly && hiddenCount > 0 && (
@@ -356,6 +450,7 @@ export default function LeftPanel() {
               onStudy={() => studyResult(r)}
               domain={domain}
               selectedNodeId={selectedNodeId}
+              translation={showTrans ? trans[resultKey(r)] : undefined}
             />
           ))}
 
@@ -402,12 +497,14 @@ function ResultCard({
   onStudy,
   domain,
   selectedNodeId,
+  translation,
 }: {
   r: SearchResult;
   onAdd: () => void;
   onStudy: () => void;
   domain: Domain;
   selectedNodeId: string | null;
+  translation?: { title: string; abstract?: string };
 }) {
   const [added, setAdded] = useState(false);
   const addEvidence = useAppStore((s) => s.addEvidence);
@@ -437,15 +534,22 @@ function ResultCard({
       <div className="flex items-start justify-between gap-2">
         <p className="font-sans text-xs text-fg-primary">{r.title}</p>
         <span className="label-mono shrink-0 text-fg-tertiary">
-          {r.source === "arxiv" ? "arXiv" : "OA"}
+          {r.source === "arxiv" ? "arXiv" : r.source === "semanticscholar" ? "S2" : "OA"}
         </span>
       </div>
+      {translation?.title && (
+        <p className="mt-0.5 font-sans text-xs text-fg-secondary">
+          译 · {translation.title}
+        </p>
+      )}
       <p className="label-mono mt-0.5 text-fg-tertiary">
         {[r.authors[0], r.year, r.venue].filter(Boolean).join(" · ")}
         {r.cited_by != null ? ` · 引 ${r.cited_by}` : ""}
       </p>
-      {r.abstract && (
-        <p className="mt-1 line-clamp-3 text-xs text-fg-secondary">{r.abstract}</p>
+      {(translation?.abstract || r.abstract) && (
+        <p className="mt-1 line-clamp-3 text-xs text-fg-secondary">
+          {translation?.abstract ?? r.abstract}
+        </p>
       )}
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         <button
