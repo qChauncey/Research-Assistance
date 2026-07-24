@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * §7 视觉系统 —— 黑白科幻极简。
+ * 参照对象是航天器遥测界面和示波器，不是 SaaS 落地页。
+ * token 层：所有颜色集中在此，组件只引用语义变量。
+ */
+:root {
+  /* 背景层 */
+  --bg-void: #000000; /* 画布最底层 */
+  --bg-surface: #0a0a0a; /* 面板 */
+  --bg-raised: #121212; /* 节点卡片 */
+  --bg-hover: #1a1a1a;
+
+  /* 文本层 */
+  --fg-primary: #ffffff;
+  --fg-secondary: #a1a1a1;
+  --fg-tertiary: #525252;
+
+  /* 结构 */
+  --border: #262626; /* 永远 1px，永不加粗 */
+  --border-focus: #ffffff;
+
+  /* 语义色 —— 全站仅此两处例外 */
+  --contradict: #ff3b30; /* 反证据 / 冲突 */
+  --dead: #525252; /* 已证伪，配删除线 */
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* React Flow 容器必须有显式高度，整条链路到 html/body 都要有高度（见"已知易踩点"） */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-void);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+#__next,
+main {
+  height: 100%;
+}
+
+/* §7.2 数据/节点/标签：全大写，字距 0.1em */
+.label-mono {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.6875rem;
+}
+
+/* 滚动条 —— 极简暗色 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-tertiary);
+}
+
+/* React Flow 主题覆盖 —— 强制黑白系统 */
+.react-flow {
+  background: var(--bg-void);
+}
+.react-flow__edge-path {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--fg-secondary);
+}
+.react-flow__handle {
+  background: var(--fg-tertiary);
+  border: 1px solid var(--border);
+  width: 6px;
+  height: 6px;
+}
+.react-flow__handle:hover {
+  background: var(--fg-primary);
+}
+.react-flow__controls {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+.react-flow__controls-button {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-secondary);
+  fill: var(--fg-secondary);
+}
+.react-flow__controls-button:hover {
+  background: var(--bg-hover);
+}
+.react-flow__attribution {
+  background: transparent;
+  color: var(--fg-tertiary);
+  font-size: 9px;
+}
+.react-flow__background {
+  color: var(--border);
+}
+
+/* §7.3 扫描线 —— 全站唯一允许发光处（长任务运行时） */
+.scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.6),
+    transparent
+  );
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
