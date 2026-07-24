@@ -25,6 +25,24 @@ export interface ChatParams {
   system?: string;
   messages: ChatMessage[];
   maxTokens?: number;
+  /** 上游超时（毫秒）。默认 55s，贴着 Vercel 函数上限（推理型模型较慢）。 */
+  timeoutMs?: number;
+}
+
+class UpstreamTimeout extends Error {}
+
+function mapErr(e: unknown): Error {
+  if (
+    e instanceof Error &&
+    (e.name === "TimeoutError" ||
+      e.name === "AbortError" ||
+      /aborted|timed out|timeout/i.test(e.message))
+  ) {
+    return new UpstreamTimeout(
+      "模型响应超时。推理型模型（如 deepseek-reasoner / 带思考的模型）通常较慢；换更快的模型（如 deepseek-v4-flash）、缩短提问，或稍后重试。",
+    );
+  }
+  return e instanceof Error ? e : new Error(String(e));
 }
 
 export interface ChatResult {
@@ -38,11 +56,20 @@ function styleOf(provider: string, override?: ApiStyle): ApiStyle {
 }
 
 export async function callLLM(p: ChatParams): Promise<ChatResult> {
+  try {
+    return await callLLMInner(p);
+  } catch (e) {
+    throw mapErr(e);
+  }
+}
+
+async function callLLMInner(p: ChatParams): Promise<ChatResult> {
   const base = resolveBaseUrl(p.provider, p.baseUrl);
   if (!base) throw new Error("缺少 Base URL");
   if (!p.model) throw new Error("缺少模型 ID");
   const style = styleOf(p.provider);
   const maxTokens = p.maxTokens ?? 1024;
+  const timeout = p.timeoutMs ?? 55000;
   const started = Date.now();
 
   if (style === "anthropic") {
@@ -59,7 +86,7 @@ export async function callLLM(p: ChatParams): Promise<ChatResult> {
         ...(p.system ? { system: p.system } : {}),
         messages: p.messages,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(timeout),
     });
     if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 300)}`);
     const data = (await res.json()) as {
@@ -88,7 +115,7 @@ export async function callLLM(p: ChatParams): Promise<ChatResult> {
         ...p.messages,
       ],
     }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(timeout),
   });
   if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 300)}`);
   const data = (await res.json()) as {

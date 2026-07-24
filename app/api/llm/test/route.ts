@@ -7,7 +7,7 @@ import { callLLM } from "@/lib/llm/chat";
  * 不落盘、不记录 body；key 仅本次请求使用。
  */
 export const runtime = "nodejs";
-export const maxDuration = 35;
+export const maxDuration = 60;
 
 interface TestReq {
   provider: string;
