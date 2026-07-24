@@ -5,102 +5,157 @@ import type { SearchResult, SearchSource, SearchResponse } from "./types";
 
 export type { SearchResult, SearchSource, SearchRequest, SearchResponse } from "./types";
 
-/** 标题归一化：小写、去所有非字母数字（含空格/标点/arXiv 版本号），用于跨源去重。 */
+/** 标题归一化：Unicode 折叠 + 去重音 + 小写 + 去所有非字母数字（含空格/标点/arXiv 版本号）。 */
 function titleKey(title: string): string {
   return title
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "") // 去组合重音符
     .toLowerCase()
     .replace(/\bv\d+\b/g, "")
     .replace(/[^a-z0-9一-鿿]+/g, "");
 }
 
-/**
- * 去重键：以归一化标题为主（同一篇论文 arXiv 预印本与期刊版标题相同但 DOI/ID 不同，
- * 只有按标题才能合并，修复"检索里出现重复论文"）；标题缺失时退回 DOI/ID。
- */
-function dedupeKey(r: SearchResult): string {
+/** 一条结果的全部去重键（标题 / DOI / arXiv / OpenAlex id）。共享任一键即视为同一篇。 */
+function keysOf(r: SearchResult): string[] {
+  const ks: string[] = [];
   const tk = titleKey(r.title);
-  if (tk.length >= 8) return `t:${tk}`;
-  if (r.doi) return `doi:${r.doi.toLowerCase()}`;
-  if (r.arxiv_id) return `arxiv:${r.arxiv_id}`;
-  if (r.openalex_id) return `oa:${r.openalex_id}`;
-  return `t:${tk}`;
+  if (tk.length >= 8) ks.push(`t:${tk}`);
+  if (r.doi) ks.push(`doi:${r.doi.toLowerCase()}`);
+  if (r.arxiv_id) ks.push(`arxiv:${r.arxiv_id.toLowerCase()}`);
+  if (r.openalex_id) ks.push(`oa:${r.openalex_id.toLowerCase()}`);
+  if (ks.length === 0) ks.push(`t:${tk}`);
+  return ks;
 }
 
 /** 源可信度基准（同行评审优先，预印本次之）。 */
 function sourceTrust(s: SearchSource): number {
-  if (s === "openalex") return 0.12;
-  if (s === "semanticscholar") return 0.12;
+  if (s === "openalex" || s === "semanticscholar") return 0.12;
   return 0; // arxiv 预印本
 }
 
-/** 预印本 / 无出处判定（用于压低低质结果）。 */
-function isPreprint(r: SearchResult): boolean {
+/** 非同行评审判定：预印本 / 开放仓库（Zenodo、figshare、SSRN、viXra 等）/ 数据集。
+ *  这类来源任何人都能上传、通常未经同行评审，质量参差，应下沉（issue 2/4）。 */
+const REPO_RE =
+  /zenodo|figshare|\bosf\b|ssrn|researchgate|academia\.edu|vixra|preprints?\.org|authorea|biorxiv|medrxiv|chemrxiv|techrxiv|psyarxiv|\bhal\b|scienceopen|slideshare|preprint/i;
+
+function hostOf(r: SearchResult): string {
+  for (const u of [r.url, r.oa_pdf_url]) {
+    if (u) {
+      try {
+        return new URL(u).hostname.toLowerCase();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return "";
+}
+
+/** 是否同行评审：有正式出处（venue）且非预印本/开放仓库/数据集。供"仅同行评审"过滤用。 */
+export function isPeerReviewed(r: SearchResult): boolean {
+  return !!(r.venue && r.venue.trim()) && !isNonPeerReviewed(r);
+}
+
+function isNonPeerReviewed(r: SearchResult): boolean {
   const v = (r.venue ?? "").toLowerCase();
-  return (
-    r.source === "arxiv" ||
-    v === "arxiv" ||
-    v.includes("preprint") ||
-    v.includes("ssrn") ||
-    v.includes("researchgate") ||
-    /^biorxiv|^medrxiv/.test(v) ||
-    (r.pub_type ?? "").toLowerCase() === "preprint"
-  );
+  const t = (r.pub_type ?? "").toLowerCase();
+  if (
+    ["preprint", "posted-content", "dataset", "report", "dissertation", "other", "paratext"].includes(
+      t,
+    )
+  )
+    return true;
+  if (r.source === "arxiv") return true;
+  if (v === "arxiv" || REPO_RE.test(v)) return true;
+  if (REPO_RE.test(hostOf(r))) return true;
+  return false;
 }
 
 /**
- * 质量分：相关度 + 引用（对数）+ 源可信度 + 同行评审加成；无出处无引用的结果下沉。
- * 目的：把同行评审、被引用的专业论文排前面，把伪科学/无出处结果排后面（issue 4）。
+ * 质量分：相关度 + 引用（对数）+ 源可信度 + 同行评审加成；
+ * 非同行评审（预印本/开放仓库/数据集）且低被引者下沉，无出处无引用者再沉，撤稿沉底。
+ * 目的：把同行评审、被引用的专业论文排前面，把 Zenodo/viXra 类未审稿与伪科学排后面。
  */
 function qualityScore(r: SearchResult): number {
   const rel = r.score ?? 0;
   const cites = Math.log10(1 + Math.max(0, r.cited_by ?? 0)); // 0..~5+
   const hasVenue = !!(r.venue && r.venue.trim());
-  const peerReviewed = !!r.doi && hasVenue && !isPreprint(r);
+  const nonPeer = isNonPeerReviewed(r);
+  const peerReviewed = !!r.doi && hasVenue && !nonPeer;
 
   let v = rel + 0.28 * cites + sourceTrust(r.source);
   if (peerReviewed) v += 0.3;
-  if (isPreprint(r)) v -= 0.05;
-  // 无出处且零引用：多为低质/掠夺性/伪科学 → 明显下沉
+  // 未经同行评审且鲜有引用 → 下沉（Zenodo/viXra/掠夺性 & 冷门预印本）
+  if (nonPeer && (r.cited_by ?? 0) < 3) v -= 0.4;
+  // 既无出处又零引用 → 再沉（多为低质/伪科学）
   if (!hasVenue && (r.cited_by ?? 0) === 0) v -= 0.5;
   if (r.retracted) v -= 5; // 撤稿沉底
   return v;
 }
 
-/** 合并两个来源，去重（同一篇论文多源命中时保留信息更全者并补全 PDF 链接）。 */
+/** 合并两条同一篇论文：同行评审一方提供 venue/source，PDF/摘要取信息更全者，引用取较大值。 */
+function mergeTwo(a: SearchResult, b: SearchResult): SearchResult {
+  const peer = [a, b].find((x) => x.venue && !isNonPeerReviewed(x));
+  return {
+    ...a,
+    source: peer?.source ?? a.source,
+    venue: peer?.venue ?? a.venue ?? b.venue,
+    pub_type: peer?.pub_type ?? a.pub_type ?? b.pub_type,
+    doi: a.doi ?? b.doi,
+    openalex_id: a.openalex_id ?? b.openalex_id,
+    arxiv_id: a.arxiv_id ?? b.arxiv_id,
+    abstract:
+      (a.abstract?.length ?? 0) >= (b.abstract?.length ?? 0) ? a.abstract : b.abstract,
+    url: a.url ?? b.url,
+    oa_pdf_url: a.oa_pdf_url ?? b.oa_pdf_url,
+    cited_by: Math.max(a.cited_by ?? 0, b.cited_by ?? 0) || undefined,
+    retracted: a.retracted || b.retracted,
+    score: Math.max(a.score ?? 0, b.score ?? 0),
+  };
+}
+
+/**
+ * 合并多个来源并去重（并查集：共享任一键——标题/DOI/arXiv/OpenAlex id——即归为一簇）。
+ * 修复"检索里仍有重复"：同一篇论文在不同源可能只共享部分标识（如 arXiv 版有 arxiv_id、
+ * 期刊版有 DOI），单键去重会漏；跨全部键做并查集才能彻底合并。
+ */
 export function mergeResults(lists: SearchResult[][]): SearchResult[] {
-  const byKey = new Map<string, SearchResult>();
-  for (const list of lists) {
-    for (const r of list) {
-      const key = dedupeKey(r);
-      const existing = byKey.get(key);
-      if (!existing) {
-        byKey.set(key, { ...r });
-      } else {
-        // 同一篇论文多源命中：让同行评审的一方提供 venue/source（预印本版本让位），
-        // 其余字段补全、PDF/摘要取信息更全者、引用取较大值。
-        const peer = [existing, r].find((x) => x.venue && !isPreprint(x));
-        byKey.set(key, {
-          ...existing,
-          source: peer?.source ?? existing.source,
-          venue: peer?.venue ?? existing.venue ?? r.venue,
-          pub_type: peer?.pub_type ?? existing.pub_type ?? r.pub_type,
-          doi: existing.doi ?? r.doi,
-          openalex_id: existing.openalex_id ?? r.openalex_id,
-          arxiv_id: existing.arxiv_id ?? r.arxiv_id,
-          abstract:
-            (existing.abstract?.length ?? 0) >= (r.abstract?.length ?? 0)
-              ? existing.abstract
-              : r.abstract,
-          url: existing.url ?? r.url,
-          oa_pdf_url: existing.oa_pdf_url ?? r.oa_pdf_url,
-          cited_by: Math.max(existing.cited_by ?? 0, r.cited_by ?? 0) || undefined,
-          retracted: existing.retracted || r.retracted,
-          score: Math.max(existing.score ?? 0, r.score ?? 0),
-        });
-      }
+  const items = lists.flat();
+  const parent = items.map((_, i) => i);
+  const find = (x: number): number => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
     }
-  }
-  return Array.from(byKey.values())
+    return x;
+  };
+  const union = (a: number, b: number) => {
+    parent[find(a)] = find(b);
+  };
+
+  const keyToIdx = new Map<string, number>();
+  items.forEach((r, i) => {
+    for (const k of keysOf(r)) {
+      const j = keyToIdx.get(k);
+      if (j !== undefined) union(i, j);
+      else keyToIdx.set(k, i);
+    }
+  });
+
+  const groups = new Map<number, SearchResult[]>();
+  items.forEach((r, i) => {
+    const root = find(i);
+    const g = groups.get(root);
+    if (g) g.push(r);
+    else groups.set(root, [r]);
+  });
+
+  const merged = Array.from(groups.values()).map((cluster) => {
+    const sorted = [...cluster].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    return sorted.reduce((acc, r) => mergeTwo(acc, r));
+  });
+
+  return merged
     .filter((r) => !r.retracted)
     .sort((a, b) => qualityScore(b) - qualityScore(a));
 }

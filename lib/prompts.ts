@@ -137,6 +137,26 @@ export function explainPassagePrompt(
   ].join("\n");
 }
 
+/** 研读·模块概述：为论文各模块分别写一句话概括（左栏概览用，JSON 输出）。 */
+export function summarizeSectionsPrompt(
+  paperTitle: string,
+  sections: { title: string; body: string }[],
+): string {
+  const blocks = sections
+    .map((s, i) => `【${i + 1}】${s.title}\n${s.body.slice(0, 700)}`)
+    .join("\n\n");
+  return [
+    `任务：为用户正在研读的论文《${paperTitle || "未命名"}》逐个模块写「一句话概述」，`,
+    `帮他快速把握论文结构。每条 ≤ 40 字，说清这个模块在做什么 / 得到了什么。`,
+    `只依据模块原文，不编造；信息不足就概述已有部分。i 用模块序号。`,
+    ``,
+    `各模块原文：`,
+    blocks,
+    ``,
+    outputContract(`{"summaries":[{"i":1,"summary":"该模块的一句话概述"}]}`),
+  ].join("\n");
+}
+
 /** 研读·「分析」：把本论文与库中其它相关论文做对比分析（自由文本输出，非 JSON）。 */
 export function analyzeComparePrompt(
   paperTitle: string,
