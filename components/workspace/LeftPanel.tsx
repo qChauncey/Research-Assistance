@@ -11,6 +11,7 @@ import {
   searchLocalLibrary,
   resultToLibraryItem,
 } from "@/lib/search/client";
+import { isPeerReviewed } from "@/lib/search";
 import { extractPdf } from "@/lib/pdf";
 import { suggestStrength } from "@/lib/grade";
 
@@ -35,6 +36,7 @@ export default function LeftPanel() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [peerOnly, setPeerOnly] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const domain = (project?.domain ?? "general") as Domain;
@@ -56,6 +58,11 @@ export default function LeftPanel() {
     () => (mode === "search" ? searchLocalLibrary(library, query) : []),
     [mode, library, query],
   );
+  const visibleResults = useMemo(
+    () => (peerOnly ? results.filter(isPeerReviewed) : results),
+    [peerOnly, results],
+  );
+  const hiddenCount = results.length - visibleResults.length;
 
   async function runSearchWith(raw: string) {
     const q = raw.trim();
@@ -315,11 +322,33 @@ export default function LeftPanel() {
           )}
 
           {results.length > 0 && (
-            <p className="label-mono px-3 py-1 text-fg-tertiary">
-              外部检索 {results.length}
+            <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+              <span className="label-mono text-fg-tertiary">
+                外部检索 {peerOnly ? visibleResults.length : results.length}
+              </span>
+              <button
+                onClick={() => setPeerOnly((v) => !v)}
+                title={
+                  peerOnly
+                    ? "仅显示同行评审文献（点开可含预印本/开放仓库）"
+                    : "含预印本/开放仓库（点开只看同行评审）"
+                }
+                className={`label-mono rounded-sm border px-2 py-0.5 ${
+                  peerOnly
+                    ? "border-border bg-bg-raised text-fg-primary"
+                    : "border-border text-fg-tertiary hover:text-fg-secondary"
+                }`}
+              >
+                {peerOnly ? "✓ 仅同行评审" : "含预印本"}
+              </button>
+            </div>
+          )}
+          {peerOnly && hiddenCount > 0 && (
+            <p className="label-mono px-3 pb-1 text-fg-tertiary">
+              已隐藏 {hiddenCount} 篇预印本/开放仓库（arXiv、Zenodo 等）
             </p>
           )}
-          {results.map((r, i) => (
+          {visibleResults.map((r, i) => (
             <ResultCard
               key={`${r.doi ?? r.openalex_id ?? r.arxiv_id ?? i}`}
               r={r}
@@ -330,6 +359,14 @@ export default function LeftPanel() {
             />
           ))}
 
+          {!busy &&
+            results.length > 0 &&
+            visibleResults.length === 0 &&
+            localMatches.length === 0 && (
+              <p className="px-3 py-4 text-xs text-fg-tertiary">
+                本次检索无同行评审结果。点上方「含预印本」查看预印本/开放仓库文献。
+              </p>
+            )}
           {!busy && results.length === 0 && localMatches.length === 0 && !searchErr && (
             <p className="px-3 py-4 text-xs text-fg-tertiary">无结果</p>
           )}

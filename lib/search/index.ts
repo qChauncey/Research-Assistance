@@ -51,6 +51,11 @@ function hostOf(r: SearchResult): string {
   return "";
 }
 
+/** 是否同行评审：有正式出处（venue）且非预印本/开放仓库/数据集。供"仅同行评审"过滤用。 */
+export function isPeerReviewed(r: SearchResult): boolean {
+  return !!(r.venue && r.venue.trim()) && !isNonPeerReviewed(r);
+}
+
 function isNonPeerReviewed(r: SearchResult): boolean {
   const v = (r.venue ?? "").toLowerCase();
   const t = (r.pub_type ?? "").toLowerCase();
