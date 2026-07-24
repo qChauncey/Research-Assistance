@@ -3,8 +3,13 @@
 import { useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { parseSections, sectionPreview, type StudySection } from "@/lib/study";
-import { composeSystem, explainPassagePrompt, analyzeComparePrompt } from "@/lib/prompts";
-import { chat, NotConfiguredError } from "@/lib/llm/client";
+import {
+  composeSystem,
+  explainPassagePrompt,
+  analyzeComparePrompt,
+  summarizeSectionsPrompt,
+} from "@/lib/prompts";
+import { chat, extractJSON, NotConfiguredError } from "@/lib/llm/client";
 import { extractPdf } from "@/lib/pdf";
 import type { Domain, FulltextStatus } from "@/lib/db/schema";
 
@@ -29,6 +34,9 @@ export default function StudyMode() {
 
   const [fetching, setFetching] = useState(false);
   const [fetchErr, setFetchErr] = useState<string | null>(null);
+  const [summaries, setSummaries] = useState<Record<string, string>>({});
+  const [summarizing, setSummarizing] = useState(false);
+  const [sumErr, setSumErr] = useState<string | null>(null);
 
   const item = library.find((l) => l.id === studyItemId) ?? null;
   const domain = (project?.domain ?? "general") as Domain;
@@ -74,6 +82,52 @@ export default function StudyMode() {
       setFetchErr(e instanceof Error ? e.message : String(e));
     } finally {
       setFetching(false);
+    }
+  }
+
+  async function summarizeModules() {
+    if (summarizing || sections.length === 0 || !item) return;
+    setSumErr(null);
+    setSummarizing(true);
+    try {
+      const reply = await chat(apiConfig, {
+        system,
+        messages: [
+          {
+            role: "user",
+            content: summarizeSectionsPrompt(
+              item.title,
+              sections.map((s) => ({ title: s.title, body: s.body })),
+            ),
+          },
+        ],
+        maxTokens: Math.min(2000, 400 + sections.length * 60),
+      });
+      const parsed = extractJSON<{ summaries?: { i?: number; summary?: string }[] }>(
+        reply,
+      );
+      const map: Record<string, string> = {};
+      for (const s of parsed?.summaries ?? []) {
+        const idx = (s.i ?? 0) - 1;
+        if (idx >= 0 && idx < sections.length && s.summary) {
+          map[sections[idx].id] = s.summary.trim();
+        }
+      }
+      if (Object.keys(map).length === 0) {
+        setSumErr("未能解析概述，可重试或换更快的模型。");
+      } else {
+        setSummaries(map);
+      }
+    } catch (e) {
+      setSumErr(
+        e instanceof NotConfiguredError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
+    } finally {
+      setSummarizing(false);
     }
   }
 
@@ -133,39 +187,65 @@ export default function StudyMode() {
 
       {/* 上部：左概览 + 右原文 */}
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {/* 左：模块概览 */}
-        <div className="min-h-0 shrink-0 overflow-y-auto border-b border-border md:w-[320px] md:border-b-0 md:border-r">
-          {sections.length === 0 ? (
-            <p className="px-4 py-4 text-xs text-fg-tertiary">
-              这篇没有可分段的原文。上传 PDF 全文后可获得模块概览。
-            </p>
-          ) : (
-            <ul>
-              {sections.map((s) => (
-                <li key={s.id}>
-                  <button
-                    onClick={() => setActiveId(s.id)}
-                    className={`block w-full border-b border-border px-4 py-2.5 text-left ${
-                      active?.id === s.id
-                        ? "bg-bg-raised"
-                        : "hover:bg-bg-hover"
-                    } ${s.level > 0 ? "pl-7" : ""}`}
-                  >
-                    <p
-                      className={`font-sans text-xs ${
-                        active?.id === s.id ? "text-fg-primary" : "text-fg-secondary"
-                      }`}
-                    >
-                      {s.title}
-                    </p>
-                    <p className="label-mono mt-0.5 line-clamp-2 text-fg-tertiary">
-                      {sectionPreview(s.body)}
-                    </p>
-                  </button>
-                </li>
-              ))}
-            </ul>
+        {/* 左：模块概览（各模块概述） */}
+        <div className="flex min-h-0 shrink-0 flex-col border-b border-border md:w-[320px] md:border-b-0 md:border-r">
+          {sections.length > 0 && (
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+              <span className="label-mono text-fg-tertiary">
+                模块概览 · {sections.length}
+              </span>
+              <button
+                onClick={summarizeModules}
+                disabled={summarizing}
+                title="用 AI 为每个模块生成一句话概述"
+                className="label-mono rounded-sm border border-border px-2 py-0.5 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary disabled:opacity-40"
+              >
+                {summarizing
+                  ? "生成中…"
+                  : Object.keys(summaries).length
+                    ? "↻ 重新概述"
+                    : "⚡ 生成概述"}
+              </button>
+            </div>
           )}
+          {sumErr && <p className="px-4 py-1.5 text-xs text-contradict">⚠ {sumErr}</p>}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {sections.length === 0 ? (
+              <p className="px-4 py-4 text-xs text-fg-tertiary">
+                这篇没有可分段的原文。上传或「⬇ 获取全文」后可获得模块概览。
+              </p>
+            ) : (
+              <ul>
+                {sections.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => setActiveId(s.id)}
+                      className={`block w-full border-b border-border px-4 py-2.5 text-left ${
+                        active?.id === s.id ? "bg-bg-raised" : "hover:bg-bg-hover"
+                      } ${s.level > 0 ? "pl-7" : ""}`}
+                    >
+                      <p
+                        className={`font-sans text-xs ${
+                          active?.id === s.id ? "text-fg-primary" : "text-fg-secondary"
+                        }`}
+                      >
+                        {s.title}
+                      </p>
+                      <p
+                        className={`mt-0.5 line-clamp-3 text-xs ${
+                          summaries[s.id]
+                            ? "text-fg-secondary"
+                            : "label-mono text-fg-tertiary"
+                        }`}
+                      >
+                        {summaries[s.id] ?? sectionPreview(s.body)}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         {/* 右：对应原文 */}
