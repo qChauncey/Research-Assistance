@@ -161,7 +161,7 @@ export default function LeftPanel() {
       const queries = Array.from(new Set([base, ...extra]));
       setExpandedQueries(queries);
       const responses = await Promise.all(queries.map((qq) => searchExternal(qq)));
-      const merged = mergeResults(responses.map((r) => r.results));
+      const merged = mergeResults(responses.map((r) => r.results), q);
       setResults(merged);
       if (merged.length === 0) {
         const errs = responses.flatMap((r) => r.errors);
