@@ -9,6 +9,7 @@ import { downloadProject, importProject } from "@/lib/db/export-import";
 import { getSupabase } from "@/lib/supabase/client";
 import { pushProject, pullProject, listRemoteProjects } from "@/lib/supabase/sync";
 import { clearAll } from "@/lib/db/storage";
+import PromptSettings from "./PromptSettings";
 import type { Domain } from "@/lib/db/schema";
 
 /**
@@ -25,6 +26,9 @@ export default function Header() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [promptsOpen, setPromptsOpen] = useState(false);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
 
   const domain = (project?.domain ?? "general") as Domain;
 
@@ -144,6 +148,14 @@ export default function Header() {
         </button>
 
         <button
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          title={theme === "dark" ? "切换到亮白系" : "切换到暗黑系"}
+          className="label-mono rounded-sm border border-border px-2 py-1 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary"
+        >
+          {theme === "dark" ? "☾ 暗黑" : "☀ 亮白"}
+        </button>
+
+        <button
           onClick={() => setMenuOpen((o) => !o)}
           className="label-mono rounded-sm border border-border px-2 py-1 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary"
         >
@@ -155,6 +167,16 @@ export default function Header() {
             <p className="label-mono px-2 py-1 text-fg-tertiary">
               {userEmail ?? "本地模式（未登录）"}
             </p>
+            <button
+              onClick={() => {
+                setPromptsOpen(true);
+                setMenuOpen(false);
+              }}
+              className="label-mono block w-full rounded-sm px-2 py-1 text-left text-fg-secondary hover:bg-bg-hover"
+            >
+              ✎ 提示词模板
+            </button>
+            <div className="my-1 border-t border-border" />
             {userEmail && (
               <>
                 <button
@@ -189,6 +211,8 @@ export default function Header() {
           </div>
         )}
       </div>
+
+      {promptsOpen && <PromptSettings onClose={() => setPromptsOpen(false)} />}
 
       {toast && (
         <div className="absolute left-1/2 top-12 z-30 -translate-x-1/2 rounded-sm border border-border bg-bg-raised px-3 py-1.5">

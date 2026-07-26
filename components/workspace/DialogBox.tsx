@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { getDomain } from "@/lib/domains";
 import { structureCheck } from "@/lib/redteam";
@@ -42,7 +42,13 @@ export default function DialogBox() {
   const domain = (project?.domain ?? "general") as Domain;
   const outputLang = language?.ui ?? "zh-CN";
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
-  const system = composeSystem(domain, outputLang);
+  // 用户在「提示词模板」里按课题分类编辑过的模板（未改则为默认）
+  const promptOverrides = useAppStore((s) => s.promptOverrides);
+  const tpl = useMemo(
+    () => promptOverrides[domain],
+    [promptOverrides, domain],
+  );
+  const system = composeSystem(domain, outputLang, tpl);
 
   function push(t: Turn) {
     setTurns((prev) => [...prev, t]);
@@ -126,6 +132,8 @@ export default function DialogBox() {
             content: redTeamPrompt(
               nodeCtxText(),
               issues.map((i) => `- ${i.message}`).join("\n"),
+              domain,
+              tpl,
             ),
           },
         ],
@@ -167,7 +175,7 @@ export default function DialogBox() {
     try {
       const reply = await chat(apiConfig, {
         system,
-        messages: [{ role: "user", content: divergePrompt(nodeCtxText()) }],
+        messages: [{ role: "user", content: divergePrompt(nodeCtxText(), domain, tpl) }],
       });
       const parsed = extractJSON<{
         directions?: { content?: string; self_critique?: string }[];
@@ -212,7 +220,7 @@ export default function DialogBox() {
     try {
       const reply = await chat(apiConfig, {
         system,
-        messages: [{ role: "user", content: comparePrompt(nodeCtxText(), others) }],
+        messages: [{ role: "user", content: comparePrompt(nodeCtxText(), others, domain, tpl) }],
       });
       const parsed = extractJSON<{ self_critique?: string }>(reply);
       await addCandidate({
@@ -245,7 +253,7 @@ export default function DialogBox() {
       const reply = await chat(apiConfig, {
         system,
         messages: [
-          { role: "user", content: makeNodePrompt(convo || input.trim(), domain) },
+          { role: "user", content: makeNodePrompt(convo || input.trim(), domain, tpl) },
         ],
       });
       const parsed = extractJSON<{

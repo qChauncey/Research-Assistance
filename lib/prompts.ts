@@ -6,22 +6,25 @@
  */
 import type { Domain } from "./db/schema";
 import { getDomain } from "./domains";
+import {
+  defaultTemplate,
+  type PromptKey,
+  type PromptTemplate,
+} from "./promptTemplates";
 
-const BASE_ROLE = `你是论证结构分析助手，不是答案提供者。红线：
-- 绝不编造文献。任何文献必须来自检索工具的真实返回，附 DOI 或 OpenAlex ID；没有就说没有。
-- 你的所有产出都进入"候选区"，由用户判死或采纳，绝不直接修改用户的树。
-- 每条建议、每个方向都必须附「我为什么可能是错的」（self_critique）。
-- 不确定时明确说不确定，不要补全成看似完整的答案。
-- 你分析论证结构（前提、假设、证伪条件、竞争解释），而非替用户下结论。`;
-
-/** 领域方法论层（随研究类型加载，§6.2）。 */
-function domainMethodology(domain: Domain): string {
-  const d = getDomain(domain);
-  return [
-    `研究领域：${d.label}。方法论判据：${d.methodologyBasis}。`,
-    `攻击/审查维度（来自领域共同体，非本工具发明）：`,
-    ...d.redTeamSequence.map((s, i) => `${i + 1}. ${s}`),
-  ].join("\n");
+/**
+ * 生效模板：调用方（组件）传入用户编辑过的模板；不传则用该领域默认模板。
+ * 任务指令可被用户改写，但 JSON 输出契约永远由代码追加（见 outputContract）。
+ */
+function tplOf(domain: Domain, tpl?: Partial<PromptTemplate>): PromptTemplate {
+  const base = defaultTemplate(domain);
+  if (!tpl) return base;
+  const out = { ...base };
+  for (const k of Object.keys(tpl) as PromptKey[]) {
+    const v = tpl[k];
+    if (typeof v === "string" && v.trim()) out[k] = v;
+  }
+  return out;
 }
 
 /** 语言指令（分字段：正文用目标语言，文献标题/引用不翻译）。 */
@@ -37,9 +40,14 @@ function languageDirective(lang: string): string {
   return `用${name}回复。专业术语首次出现时保留英文原文并加括号标注。引用文献时保留原始英文标题，绝不翻译。`;
 }
 
-/** 组装全局 system prompt。 */
-export function composeSystem(domain: Domain, outputLang: string): string {
-  return [BASE_ROLE, domainMethodology(domain), languageDirective(outputLang)]
+/** 组装全局 system prompt（角色 + 领域方法论 + 语言指令；前两段可被用户模板覆盖）。 */
+export function composeSystem(
+  domain: Domain,
+  outputLang: string,
+  tpl?: Partial<PromptTemplate>,
+): string {
+  const t = tplOf(domain, tpl);
+  return [t.baseRole, t.methodology, languageDirective(outputLang)]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -71,14 +79,19 @@ export function renderNodeContext(node: NodeCtx, extra?: string): string {
 // —— 任务指令构造器（返回追加到 system 之后的 user 指令） ——
 
 /** ⚔ 红队第 2 步：领域序列（第 1 步结构检查已由确定性代码完成）。 */
-export function redTeamPrompt(nodeCtx: string, structureFindings: string): string {
+export function redTeamPrompt(
+  nodeCtx: string,
+  structureFindings: string,
+  domain: Domain = "general",
+  tpl?: Partial<PromptTemplate>,
+): string {
   return [
-    `对下列节点执行红队审查（领域序列）。第 1 步的确定性结构检查已完成，结果如下，不要重复：`,
+    tplOf(domain, tpl).redTeam,
+    ``,
+    `第 1 步确定性结构检查结果（不要重复）：`,
     structureFindings || "（无结构性问题）",
     ``,
     nodeCtx,
-    ``,
-    `逐条执行方法论攻击维度，给出对该节点的实质判断（会出错，用户会裁决）。`,
     outputContract(
       `{"findings":[{"dimension":"攻击维度","issue":"发现的问题或薄弱点","self_critique":"我这条判断为什么可能是错的"}]}`,
     ),
@@ -86,9 +99,13 @@ export function redTeamPrompt(nodeCtx: string, structureFindings: string): strin
 }
 
 /** ✦ 发散：Brainstorm。强制自我攻击（新颖性检索由前端另跑）。 */
-export function divergePrompt(nodeCtx: string): string {
+export function divergePrompt(
+  nodeCtx: string,
+  domain: Domain = "general",
+  tpl?: Partial<PromptTemplate>,
+): string {
   return [
-    `基于下列节点，提出若干新的研究方向/连接点（brainstorm）。你最容易在这里放大幻觉，因此每条必须诚实。`,
+    tplOf(domain, tpl).diverge,
     ``,
     nodeCtx,
     ``,
@@ -99,9 +116,14 @@ export function divergePrompt(nodeCtx: string): string {
 }
 
 /** ⇄ 对比：抽取他人论文的假设-方法-结论三元组，与用户的树对齐。 */
-export function comparePrompt(nodeCtx: string, othersText: string): string {
+export function comparePrompt(
+  nodeCtx: string,
+  othersText: string,
+  domain: Domain = "general",
+  tpl?: Partial<PromptTemplate>,
+): string {
   return [
-    `这是描述性任务：抽取对方工作的「假设-方法-结论」三元组，并与用户的节点对齐。不需要你有判断力，只需准确归纳。`,
+    tplOf(domain, tpl).compare,
     ``,
     `用户的节点：`,
     nodeCtx,
@@ -120,15 +142,14 @@ export function explainPassagePrompt(
   paperTitle: string,
   passage: string,
   sectionTitle?: string,
+  domain: Domain = "general",
+  tpl?: Partial<PromptTemplate>,
 ): string {
   return [
-    `阅读理解任务：用户正在研读论文《${paperTitle || "未命名"}》${
+    `用户正在研读论文《${paperTitle || "未命名"}》${
       sectionTitle ? `（${sectionTitle} 部分）` : ""
-    }，选取了下面这段原文，请帮他读懂它。要求：`,
-    `- 用通俗但准确的语言说清这段在讲什么；`,
-    `- 点出其中的关键术语、假设、方法或结论（术语首次出现保留英文原文）；`,
-    `- 若这段涉及可证伪的经验命题，指出它的证伪条件是什么；`,
-    `- 不确定或原文没说清的地方，直接说不确定，绝不编造。`,
+    }，选取了下面这段原文。`,
+    tplOf(domain, tpl).explain,
     ``,
     `原文：`,
     `"""`,
@@ -141,14 +162,16 @@ export function explainPassagePrompt(
 export function summarizeSectionsPrompt(
   paperTitle: string,
   sections: { title: string; body: string }[],
+  domain: Domain = "general",
+  tpl?: Partial<PromptTemplate>,
 ): string {
   const blocks = sections
     .map((s, i) => `【${i + 1}】${s.title}\n${s.body.slice(0, 700)}`)
     .join("\n\n");
   return [
-    `任务：为用户正在研读的论文《${paperTitle || "未命名"}》逐个模块写「一句话概述」，`,
-    `帮他快速把握论文结构。每条 ≤ 40 字，说清这个模块在做什么 / 得到了什么。`,
-    `只依据模块原文，不编造；信息不足就概述已有部分。i 用模块序号。`,
+    `论文：《${paperTitle || "未命名"}》`,
+    tplOf(domain, tpl).summarize,
+    `i 用模块序号。`,
     ``,
     `各模块原文：`,
     blocks,
@@ -163,6 +186,8 @@ export function analyzeComparePrompt(
   paperSummary: string,
   others: { title: string; abstract?: string }[],
   focus?: string,
+  domain: Domain = "general",
+  tpl?: Partial<PromptTemplate>,
 ): string {
   const othersText =
     others.length === 0
@@ -174,11 +199,10 @@ export function analyzeComparePrompt(
           )
           .join("\n\n");
   return [
-    `对比分析任务：用户正在研读论文《${paperTitle || "未命名"}》。请围绕${
+    `用户正在研读论文《${paperTitle || "未命名"}》。请围绕${
       focus?.trim() ? `「${focus.trim()}」` : "该论文的核心论点"
-    }，把它与文献库中其它相关论文做对比。`,
-    `客观归纳：共识在哪、分歧在哪（真正的分歧点最有价值）、各自独特的贡献或盲点。`,
-    `只依据给出的材料；材料不足以判断处，明说不足，不要脑补论文里没有的内容。`,
+    }展开。`,
+    tplOf(domain, tpl).analyze,
     ``,
     `本论文：`,
     paperSummary || "（仅有标题）",
@@ -189,11 +213,15 @@ export function analyzeComparePrompt(
 }
 
 /** ⊕ 建节点：把对话结论转成节点草案（进候选区待确认）。 */
-export function makeNodePrompt(conversation: string, domain: Domain): string {
+export function makeNodePrompt(
+  conversation: string,
+  domain: Domain,
+  tpl?: Partial<PromptTemplate>,
+): string {
   const d = getDomain(domain);
   const types = d.nodeTypes.map((t) => t.id).join(" | ");
   return [
-    `把下面的对话结论提炼成一个节点草案。`,
+    tplOf(domain, tpl).makeNode,
     ``,
     conversation,
     ``,

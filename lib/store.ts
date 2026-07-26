@@ -24,6 +24,12 @@ import { SCHEMA_VERSION } from "./db/schema";
 import * as db from "./db/storage";
 import { deriveFalsifierStatus } from "./methodology";
 import { getDomain } from "./domains";
+import {
+  defaultTemplate,
+  type PromptKey,
+  type PromptOverrides,
+  type PromptTemplate,
+} from "./promptTemplates";
 
 function now() {
   return new Date().toISOString();
@@ -70,6 +76,10 @@ interface AppState {
 
   apiConfig: ApiConfig | null;
   language: LanguageConfig | null;
+  /** 界面主题：暗黑系（默认）/ 亮白系 */
+  theme: "dark" | "light";
+  /** 按课题分类的提示词覆盖（只存改过的字段） */
+  promptOverrides: PromptOverrides;
 
   project: Project | null;
   nodes: ArgNode[];
@@ -136,6 +146,17 @@ interface AppState {
   clearPendingRedTeam: () => void;
   openStudy: (libItemId: string) => void;
   closeStudy: () => void;
+
+  // —— 主题 / 提示词模板 ——
+  setTheme: (t: "dark" | "light") => Promise<void>;
+  /** 保存某领域某字段的提示词（传空字符串等于还原该字段） */
+  setPrompt: (domain: Domain, key: PromptKey, value: string) => Promise<void>;
+  /** 还原某领域某字段为默认模板 */
+  resetPrompt: (domain: Domain, key: PromptKey) => Promise<void>;
+  /** 还原某领域全部字段 */
+  resetDomainPrompts: (domain: Domain) => Promise<void>;
+  /** 取某领域生效模板（默认叠加覆盖） */
+  effectiveTemplate: (domain: Domain) => PromptTemplate;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -145,6 +166,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   userEmail: null,
   apiConfig: null,
   language: null,
+  theme: "dark",
+  promptOverrides: {},
   project: null,
   nodes: [],
   evidence: [],
@@ -156,15 +179,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   studyItemId: null,
 
   init: async () => {
-    const [apiConfig, language, onboarded, activeProjectId, userId, userEmail] =
-      await Promise.all([
-        db.getSetting("apiConfig"),
-        db.getSetting("language"),
-        db.getSetting("onboarded"),
-        db.getSetting("activeProjectId"),
-        db.getSetting("userId"),
-        db.getSetting("userEmail"),
-      ]);
+    const [
+      apiConfig,
+      language,
+      onboarded,
+      activeProjectId,
+      userId,
+      userEmail,
+      theme,
+      promptOverrides,
+    ] = await Promise.all([
+      db.getSetting("apiConfig"),
+      db.getSetting("language"),
+      db.getSetting("onboarded"),
+      db.getSetting("activeProjectId"),
+      db.getSetting("userId"),
+      db.getSetting("userEmail"),
+      db.getSetting("theme"),
+      db.getSetting("promptOverrides"),
+    ]);
 
     set({
       apiConfig: apiConfig ?? null,
@@ -172,6 +205,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       onboarded: !!onboarded,
       userId: userId ?? null,
       userEmail: userEmail ?? null,
+      theme: theme ?? "dark",
+      promptOverrides: promptOverrides ?? {},
     });
 
     if (onboarded && activeProjectId) {
@@ -448,6 +483,47 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearPendingRedTeam: () => set({ pendingRedTeam: null }),
   openStudy: (libItemId) => set({ studyItemId: libItemId }),
   closeStudy: () => set({ studyItemId: null }),
+
+  setTheme: async (t) => {
+    await db.setSetting("theme", t);
+    set({ theme: t });
+  },
+
+  setPrompt: async (domain, key, value) => {
+    const cur = get().promptOverrides;
+    const forDomain = { ...(cur[domain] ?? {}) };
+    const def = defaultTemplate(domain)[key];
+    // 空值或与默认完全一致 → 视为未覆盖，删除该键（保持"跟随默认演进"）
+    if (!value.trim() || value === def) delete forDomain[key];
+    else forDomain[key] = value;
+    const next: PromptOverrides = { ...cur, [domain]: forDomain };
+    if (Object.keys(forDomain).length === 0) delete next[domain];
+    await db.setSetting("promptOverrides", next);
+    set({ promptOverrides: next });
+  },
+
+  resetPrompt: async (domain, key) => {
+    await get().setPrompt(domain, key, "");
+  },
+
+  resetDomainPrompts: async (domain) => {
+    const next = { ...get().promptOverrides };
+    delete next[domain];
+    await db.setSetting("promptOverrides", next);
+    set({ promptOverrides: next });
+  },
+
+  effectiveTemplate: (domain) => {
+    const base = defaultTemplate(domain);
+    const ov = get().promptOverrides[domain];
+    if (!ov) return base;
+    const out = { ...base };
+    for (const k of Object.keys(ov) as PromptKey[]) {
+      const v = ov[k];
+      if (typeof v === "string" && v.trim()) out[k] = v;
+    }
+    return out;
+  },
 }));
 
 /** 便捷：当前项目的领域配置。 */

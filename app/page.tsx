@@ -15,10 +15,16 @@ export default function Home() {
   const onboarded = useAppStore((s) => s.onboarded);
   const language = useAppStore((s) => s.language);
   const init = useAppStore((s) => s.init);
+  const theme = useAppStore((s) => s.theme);
 
   useEffect(() => {
     init();
   }, [init]);
+
+  // 主题落到 <html data-theme>，token 层（globals.css）据此整体反转
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   // 引导前 language 为空，默认中文界面（产品中文优先）；已引导则用用户所选。
   const locale = resolveLocale(language?.ui ?? "zh-CN");

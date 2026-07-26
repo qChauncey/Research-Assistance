@@ -29,6 +29,32 @@
 
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  /* 扫描线（唯一允许发光处）——暗色下为白光 */
+  --scan-rgb: 255, 255, 255;
+}
+
+/*
+ * 亮白系主题：同一套 token 反转，保持"黑白极简"的性格（不引入彩色、不加阴影层次）。
+ * 纯白留给最底层画布，面板用极浅灰分层，边框仍是 1px。
+ */
+:root[data-theme="light"] {
+  --bg-void: #ffffff;
+  --bg-surface: #fafafa;
+  --bg-raised: #f4f4f4;
+  --bg-hover: #ebebeb;
+
+  --fg-primary: #0a0a0a;
+  --fg-secondary: #525252;
+  --fg-tertiary: #8f8f8f;
+
+  --border: #dcdcdc;
+  --border-focus: #0a0a0a;
+
+  --contradict: #d92318; /* 亮底上加深，保证对比度 */
+  --dead: #8f8f8f;
+
+  --scan-rgb: 0, 0, 0;
 }
 
 * {
@@ -131,9 +157,15 @@ main {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.6),
+    rgba(var(--scan-rgb), 0.6),
     transparent
   );
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 8px rgba(var(--scan-rgb), 0.4);
   pointer-events: none;
+}
+
+/* 主题切换时不做全局过渡动画（避免拖拽/画布重绘期间闪烁），仅背景与文字柔和过渡 */
+body,
+.react-flow {
+  transition: background-color 0.15s linear, color 0.15s linear;
 }
