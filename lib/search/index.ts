@@ -51,9 +51,11 @@ function hostOf(r: SearchResult): string {
   return "";
 }
 
-/** 是否同行评审：有正式出处（venue）且非预印本/开放仓库/数据集。供"仅同行评审"过滤用。 */
+/** 是否同行评审：有正式出处（venue 或 DOI）且非预印本/开放仓库/数据集。供"仅同行评审"过滤用。
+ *  用 venue 或 DOI 两者之一，避免 OpenAlex/S2 偶尔缺 venue 字段时把正规期刊论文误隐藏。 */
 export function isPeerReviewed(r: SearchResult): boolean {
-  return !!(r.venue && r.venue.trim()) && !isNonPeerReviewed(r);
+  const hasOutlet = !!(r.venue && r.venue.trim()) || !!r.doi;
+  return hasOutlet && !isNonPeerReviewed(r);
 }
 
 function isNonPeerReviewed(r: SearchResult): boolean {
@@ -71,24 +73,51 @@ function isNonPeerReviewed(r: SearchResult): boolean {
   return false;
 }
 
+/** 检索词分词（用于标题加权，模仿 Google Scholar 的标题命中权重）。 */
+function tokenize(q: string): string[] {
+  return (q || "")
+    .toLowerCase()
+    .split(/[^a-z0-9一-鿿]+/)
+    .filter((t) => t.length >= 2 && !STOP.has(t));
+}
+const STOP = new Set([
+  "the", "a", "an", "of", "and", "or", "for", "to", "in", "on", "with", "by",
+  "is", "are", "be", "as", "at", "from", "that", "this", "we", "our", "study",
+]);
+
+const CURRENT_YEAR = new Date().getFullYear();
+
 /**
- * 质量分：相关度 + 引用（对数）+ 源可信度 + 同行评审加成；
- * 非同行评审（预印本/开放仓库/数据集）且低被引者下沉，无出处无引用者再沉，撤稿沉底。
- * 目的：把同行评审、被引用的专业论文排前面，把 Zenodo/viXra 类未审稿与伪科学排后面。
+ * Google Scholar 风格排序分：
+ *  - 相关度（source 提供的真实/保序相关度）
+ *  - 标题命中（查询词出现在标题里，GS 对标题权重很高）
+ *  - 引用数（对数；GS 的主导信号，凸显 seminal 工作）
+ *  - 近三十年内的轻度新近度（避免全是老论文）
+ *  - 同行评审加成；预印本/开放仓库/无出处低被引下沉；撤稿沉底
  */
-function qualityScore(r: SearchResult): number {
-  const rel = r.score ?? 0;
-  const cites = Math.log10(1 + Math.max(0, r.cited_by ?? 0)); // 0..~5+
+function gsScore(r: SearchResult, tokens: string[]): number {
+  const rel = r.score ?? 0; // 0..1
+  const title = (r.title || "").toLowerCase();
+  const titleHits = tokens.length
+    ? tokens.filter((t) => title.includes(t)).length / tokens.length
+    : 0; // 0..1
+  const cites = Math.log10(1 + Math.max(0, r.cited_by ?? 0)); // 0..~6
+  const age = r.year ? Math.max(0, CURRENT_YEAR - r.year) : 40;
+  const recency = Math.max(0, 1 - age / 40); // 0..1
+
   const hasVenue = !!(r.venue && r.venue.trim());
   const nonPeer = isNonPeerReviewed(r);
-  const peerReviewed = !!r.doi && hasVenue && !nonPeer;
+  const peerReviewed = (!!r.doi || hasVenue) && !nonPeer;
 
-  let v = rel + 0.28 * cites + sourceTrust(r.source);
+  let v =
+    1.2 * rel +
+    0.9 * titleHits +
+    0.5 * cites +
+    0.15 * recency +
+    sourceTrust(r.source);
   if (peerReviewed) v += 0.3;
-  // 未经同行评审且鲜有引用 → 下沉（Zenodo/viXra/掠夺性 & 冷门预印本）
-  if (nonPeer && (r.cited_by ?? 0) < 3) v -= 0.4;
-  // 既无出处又零引用 → 再沉（多为低质/伪科学）
-  if (!hasVenue && (r.cited_by ?? 0) === 0) v -= 0.5;
+  if (nonPeer && (r.cited_by ?? 0) < 3) v -= 0.4; // 冷门预印本/仓库下沉
+  if (!hasVenue && (r.cited_by ?? 0) === 0) v -= 0.5; // 无出处无引用再沉
   if (r.retracted) v -= 5; // 撤稿沉底
   return v;
 }
@@ -119,7 +148,8 @@ function mergeTwo(a: SearchResult, b: SearchResult): SearchResult {
  * 修复"检索里仍有重复"：同一篇论文在不同源可能只共享部分标识（如 arXiv 版有 arxiv_id、
  * 期刊版有 DOI），单键去重会漏；跨全部键做并查集才能彻底合并。
  */
-export function mergeResults(lists: SearchResult[][]): SearchResult[] {
+export function mergeResults(lists: SearchResult[][], query = ""): SearchResult[] {
+  const tokens = tokenize(query);
   const items = lists.flat();
   const parent = items.map((_, i) => i);
   const find = (x: number): number => {
@@ -157,7 +187,7 @@ export function mergeResults(lists: SearchResult[][]): SearchResult[] {
 
   return merged
     .filter((r) => !r.retracted)
-    .sort((a, b) => qualityScore(b) - qualityScore(a));
+    .sort((a, b) => gsScore(b, tokens) - gsScore(a, tokens));
 }
 
 /** 并发查询多个源，单源失败不影响其他源（§5.1 A：合并去重、按质量+相关度排序）。 */
@@ -185,5 +215,5 @@ export async function runSearch(
   });
   await Promise.all(tasks);
 
-  return { results: mergeResults(lists), errors };
+  return { results: mergeResults(lists, query), errors };
 }

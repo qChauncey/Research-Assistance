@@ -11,7 +11,7 @@ import {
   searchLocalLibrary,
   resultToLibraryItem,
 } from "@/lib/search/client";
-import { isPeerReviewed } from "@/lib/search";
+import { isPeerReviewed, mergeResults } from "@/lib/search";
 import {
   hasCJK,
   isCJKLang,
@@ -19,6 +19,8 @@ import {
   translateQuery,
   translateResults,
 } from "@/lib/translate";
+import { expandQueries } from "@/lib/semantic";
+import { getDomain } from "@/lib/domains";
 import { extractPdf } from "@/lib/pdf";
 import { suggestStrength } from "@/lib/grade";
 
@@ -45,9 +47,11 @@ export default function LeftPanel() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [peerOnly, setPeerOnly] = useState(true);
+  const [peerOnly, setPeerOnly] = useState(false);
   // 跨语言检索：检索词被翻译成检索语言时的提示
   const [translatedQuery, setTranslatedQuery] = useState<string | null>(null);
+  // 相关观点检索：LLM 扩展出的检索式
+  const [expandedQueries, setExpandedQueries] = useState<string[] | null>(null);
   // 结果翻译（阅读辅助）：按结果键存译文
   const [trans, setTrans] = useState<Record<string, { title: string; abstract?: string }>>({});
   const [showTrans, setShowTrans] = useState(false);
@@ -89,6 +93,7 @@ export default function LeftPanel() {
     setTrans({});
     setShowTrans(false);
     setTranslatedQuery(null);
+    setExpandedQueries(null);
     try {
       // 跨语言检索：检索词与检索语言脚本不一致时，先翻译成检索语言（学术库以英文为主）
       let searchQ = q;
@@ -104,7 +109,12 @@ export default function LeftPanel() {
           /* 翻译失败则退回原检索词 */
         }
       }
-      const resp = await searchExternal(searchQ);
+      let resp = await searchExternal(searchQ);
+      // 翻译后的检索词若一无所获，退回原检索词再试一次（避免翻译偏差导致"搜不到"）
+      if (resp.results.length === 0 && searchQ !== q) {
+        setTranslatedQuery(null);
+        resp = await searchExternal(q);
+      }
       setResults(resp.results);
       if (resp.errors.length && resp.results.length === 0) {
         setSearchErr(resp.errors.map((e) => `${e.source}: ${e.message}`).join(" · "));
@@ -116,6 +126,54 @@ export default function LeftPanel() {
     }
   }
   const runSearch = () => runSearchWith(query);
+
+  // —— 相关观点检索：LLM 把主题扩展成多条检索式，分别检索再合并去重 ——
+  async function runSemanticWith(raw: string) {
+    const q = raw.trim();
+    if (!q) return;
+    if (!apiConfig?.model) {
+      setMode("search");
+      setSearchErr("相关观点检索需要先在设置里配置模型。");
+      return;
+    }
+    setMode("search");
+    setBusy(true);
+    setSearchErr(null);
+    setResults([]);
+    setTrans({});
+    setShowTrans(false);
+    setTranslatedQuery(null);
+    setExpandedQueries(null);
+    try {
+      const searchLang = language?.search ?? "en";
+      const targetName = langName(searchLang);
+      // 原词先按需翻译成检索语言
+      let base = q;
+      if (hasCJK(q) !== isCJKLang(searchLang)) {
+        try {
+          const t = await translateQuery(apiConfig, q, targetName);
+          if (t) base = t;
+        } catch {
+          /* 退回原词 */
+        }
+      }
+      const extra = await expandQueries(apiConfig, q, getDomain(domain).label, targetName);
+      const queries = Array.from(new Set([base, ...extra]));
+      setExpandedQueries(queries);
+      const responses = await Promise.all(queries.map((qq) => searchExternal(qq)));
+      const merged = mergeResults(responses.map((r) => r.results), q);
+      setResults(merged);
+      if (merged.length === 0) {
+        const errs = responses.flatMap((r) => r.errors);
+        if (errs.length)
+          setSearchErr(errs.map((e) => `${e.source}: ${e.message}`).join(" · "));
+      }
+    } catch (e) {
+      setSearchErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // 结果键（用于映射译文；优先稳定标识，退回标题）
   const resultKey = (r: SearchResult) =>
@@ -241,17 +299,38 @@ export default function LeftPanel() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && runSearch()}
-          placeholder="⌕ 检索 OpenAlex / arXiv 或本地库"
+          placeholder="⌕ 检索 OpenAlex / S2 / arXiv 或本地库"
           className="text-xs"
         />
-        {mode === "search" && (
+        <div className="mt-2 flex items-center gap-1.5">
           <button
-            onClick={() => setMode("library")}
-            className="label-mono mt-2 text-fg-tertiary hover:text-fg-primary"
+            onClick={() => runSearch()}
+            disabled={busy || !query.trim()}
+            className="label-mono rounded-sm border border-border px-2 py-0.5 text-fg-secondary hover:bg-bg-hover disabled:opacity-40"
           >
-            ‹ 返回文献库
+            ⌕ 关键词
           </button>
-        )}
+          <button
+            onClick={() => runSemanticWith(query)}
+            disabled={busy || !query.trim() || !apiConfig?.model}
+            title={
+              apiConfig?.model
+                ? "用模型扩展成相近观点/相关概念的多条检索式，找出换个说法表达同类论点的论文"
+                : "需先配置模型"
+            }
+            className="label-mono rounded-sm border border-border px-2 py-0.5 text-fg-secondary hover:bg-bg-hover disabled:opacity-40"
+          >
+            ✦ 相关观点
+          </button>
+          {mode === "search" && (
+            <button
+              onClick={() => setMode("library")}
+              className="label-mono ml-auto text-fg-tertiary hover:text-fg-primary"
+            >
+              ‹ 文献库
+            </button>
+          )}
+        </div>
       </div>
 
       {mode === "library" ? (
@@ -384,6 +463,12 @@ export default function LeftPanel() {
           {translatedQuery && (
             <p className="label-mono px-3 pt-1.5 text-fg-tertiary">
               跨语言检索 · 检索词已译：「{translatedQuery}」
+            </p>
+          )}
+          {expandedQueries && expandedQueries.length > 0 && (
+            <p className="label-mono px-3 pt-1.5 text-fg-tertiary">
+              相关观点检索 · 已扩展 {expandedQueries.length} 组：
+              {expandedQueries.slice(0, 4).join(" / ")}
             </p>
           )}
           {results.length > 0 && (

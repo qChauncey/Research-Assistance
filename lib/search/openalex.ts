@@ -24,6 +24,7 @@ interface OAWork {
   type?: string;
   publication_year?: number;
   cited_by_count?: number;
+  relevance_score?: number;
   is_retracted?: boolean;
   authorships?: OAAuthorship[];
   primary_location?: OALocation;
@@ -73,8 +74,12 @@ export async function searchOpenAlex(
   if (!res.ok) throw new Error(`OpenAlex ${res.status}`);
   const data = (await res.json()) as { results?: OAWork[] };
 
-  return (data.results ?? []).map((w, i): SearchResult => {
+  const works = data.results ?? [];
+  // OpenAlex 用 search 时返回 relevance_score（真实相关度）；批内归一化到 0..1，用于跨源排序。
+  const maxRel = Math.max(1e-6, ...works.map((w) => w.relevance_score ?? 0));
+  return works.map((w, i): SearchResult => {
     const oa = w.best_oa_location ?? w.primary_location;
+    const rel = w.relevance_score != null ? w.relevance_score / maxRel : 1 - i * 0.01;
     return {
       source: "openalex",
       title: w.title ?? w.display_name ?? "(untitled)",
@@ -93,7 +98,7 @@ export async function searchOpenAlex(
       oa_pdf_url: oa?.pdf_url,
       pub_type: w.type,
       retracted: w.is_retracted,
-      score: 1 - i * 0.01, // 保序权重
+      score: rel, // 归一化真实相关度
     };
   });
 }
