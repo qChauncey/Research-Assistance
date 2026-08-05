@@ -15,6 +15,7 @@ import type {
   ApiConfig,
   LanguageConfig,
 } from "./schema";
+import type { PromptOverrides } from "../promptTemplates";
 
 const DB_NAME = "argument-tree";
 const DB_VERSION = 1;
@@ -173,6 +174,10 @@ export interface AppSettings {
   /** 登录用户 id（Supabase）或 null（纯离线） */
   userId?: string | null;
   userEmail?: string | null;
+  /** 界面主题：暗黑系 / 亮白系 */
+  theme?: "dark" | "light";
+  /** 按课题分类的提示词覆盖（只存用户改过的字段） */
+  promptOverrides?: PromptOverrides;
 }
 
 export async function getSetting<K extends keyof AppSettings>(

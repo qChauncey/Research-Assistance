@@ -12,6 +12,7 @@ import {
 import { chat, extractJSON, NotConfiguredError } from "@/lib/llm/client";
 import { extractPdf } from "@/lib/pdf";
 import type { Domain, FulltextStatus } from "@/lib/db/schema";
+import type { PromptTemplate } from "@/lib/promptTemplates";
 
 /**
  * 研读模式（新增大功能）。全屏覆盖层。
@@ -41,7 +42,12 @@ export default function StudyMode() {
   const item = library.find((l) => l.id === studyItemId) ?? null;
   const domain = (project?.domain ?? "general") as Domain;
   const outputLang = language?.ui ?? "zh-CN";
-  const system = useMemo(() => composeSystem(domain, outputLang), [domain, outputLang]);
+  const promptOverrides = useAppStore((s) => s.promptOverrides);
+  const tpl = useMemo(() => promptOverrides[domain], [promptOverrides, domain]);
+  const system = useMemo(
+    () => composeSystem(domain, outputLang, tpl),
+    [domain, outputLang, tpl],
+  );
 
   // 全文优先用 extracted_text；仅元数据时退化到 abstract。
   const sourceText = item?.extracted_text?.trim() || item?.abstract?.trim() || "";
@@ -98,6 +104,8 @@ export default function StudyMode() {
             content: summarizeSectionsPrompt(
               item.title,
               sections.map((s) => ({ title: s.title, body: s.body })),
+              domain,
+              tpl,
             ),
           },
         ],
@@ -275,6 +283,8 @@ export default function StudyMode() {
           .filter((l) => l.id !== item.id)
           .map((l) => ({ title: l.title, abstract: l.abstract }))}
         activeTitle={active?.title}
+        domain={domain}
+        tpl={tpl}
       />
     </div>
   );
@@ -297,6 +307,8 @@ function StudyDialog({
   paperSummary,
   others,
   activeTitle,
+  domain,
+  tpl,
 }: {
   tab: StudyTab;
   setTab: (t: StudyTab) => void;
@@ -306,6 +318,8 @@ function StudyDialog({
   paperSummary: string;
   others: { title: string; abstract?: string }[];
   activeTitle?: string;
+  domain: Domain;
+  tpl?: Partial<PromptTemplate>;
 }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -326,8 +340,8 @@ function StudyDialog({
     try {
       const content =
         tab === "explain"
-          ? explainPassagePrompt(paperTitle, q, activeTitle)
-          : analyzeComparePrompt(paperTitle, paperSummary, others, q);
+          ? explainPassagePrompt(paperTitle, q, activeTitle, domain, tpl)
+          : analyzeComparePrompt(paperTitle, paperSummary, others, q, domain, tpl);
       const reply = await chat(apiConfig, {
         system,
         messages: [{ role: "user", content }],
