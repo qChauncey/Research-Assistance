@@ -29,6 +29,23 @@ const en: Dict = {
     email: "Email",
     password: "Password",
     offlineEntry: "Skip login — local only",
+    forgotPassword: "Forgot password?",
+    resetTitle: "Reset password",
+    resetHint:
+      "Enter your account email and we'll send you a password reset link.",
+    sendResetEmail: "Send reset email",
+    resetEmailSent:
+      "Reset email sent. Check your inbox (and spam), then follow the link to set a new password.",
+    backToLogin: "‹ Back to log in",
+    newPassword: "New password",
+    confirmPassword: "Confirm new password",
+    updatePassword: "Set new password",
+    passwordMismatch: "The two passwords do not match.",
+    passwordTooShort: "Password must be at least 6 characters.",
+    resetDone: "Password updated. Signing you in…",
+    resetLinkInvalid:
+      "This reset link is invalid or has expired. Please request a new one.",
+    verifyingLink: "Verifying reset link…",
     offlineHint:
       "All state stays in your browser (IndexedDB). Privacy-sensitive work need not go to the cloud.",
     apiTitle: "Configure API",
