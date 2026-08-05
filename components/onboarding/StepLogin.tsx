@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { Button, Input, Field } from "@/components/ui/primitives";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
+import {
+  getSupabase,
+  isSupabaseConfigured,
+  sendPasswordReset,
+} from "@/lib/supabase/client";
 import type { OnboardingDraft } from "./OnboardingFlow";
 
 /**
@@ -26,7 +30,24 @@ export default function StepLogin({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  /** 忘记密码模式：只要邮箱，发验证邮件 */
+  const [forgot, setForgot] = useState(false);
   const cloudAvailable = isSupabaseConfigured();
+
+  async function onSendReset() {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      await sendPasswordReset(email);
+      // 不区分邮箱是否存在（防账号枚举），一律提示已发送
+      setInfo(t.onboarding.resetEmailSent);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function auth(mode: "login" | "register") {
     setError(null);
@@ -79,46 +100,114 @@ export default function StepLogin({
       </div>
 
       {cloudAvailable ? (
-        <div className="space-y-4">
-          <Field label={t.onboarding.email}>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-          </Field>
-          <Field label={t.onboarding.password}>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
-          </Field>
+        forgot ? (
+          // —— 忘记密码：邮箱验证重置 ——
+          <div className="space-y-4">
+            <div>
+              <p className="label-mono text-fg-secondary">
+                {t.onboarding.resetTitle}
+              </p>
+              <p className="mt-1 text-xs text-fg-tertiary">
+                {t.onboarding.resetHint}
+              </p>
+            </div>
+            <Field label={t.onboarding.email}>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing && email)
+                    onSendReset();
+                }}
+              />
+            </Field>
 
-          {error && <p className="text-xs text-contradict">{error}</p>}
-          {info && <p className="text-xs text-fg-secondary">{info}</p>}
+            {error && <p className="text-xs text-contradict">{error}</p>}
+            {info && <p className="text-xs text-fg-secondary">{info}</p>}
 
-          <div className="flex gap-2">
             <Button
               variant="primary"
-              className="flex-1"
-              disabled={busy || !email || !password}
-              onClick={() => auth("login")}
+              className="w-full"
+              disabled={busy || !email}
+              onClick={onSendReset}
             >
-              {t.onboarding.login}
+              {t.onboarding.sendResetEmail}
             </Button>
-            <Button
-              className="flex-1"
-              disabled={busy || !email || !password}
-              onClick={() => auth("register")}
+            <button
+              onClick={() => {
+                setForgot(false);
+                setError(null);
+                setInfo(null);
+              }}
+              className="label-mono text-fg-tertiary hover:text-fg-primary"
             >
-              {t.onboarding.register}
-            </Button>
+              {t.onboarding.backToLogin}
+            </button>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-4">
+            <Field label={t.onboarding.email}>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </Field>
+            <Field label={t.onboarding.password}>
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter" &&
+                    !e.nativeEvent.isComposing &&
+                    email &&
+                    password
+                  )
+                    auth("login");
+                }}
+              />
+            </Field>
+
+            {error && <p className="text-xs text-contradict">{error}</p>}
+            {info && <p className="text-xs text-fg-secondary">{info}</p>}
+
+            <div className="flex gap-2">
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={busy || !email || !password}
+                onClick={() => auth("login")}
+              >
+                {t.onboarding.login}
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={busy || !email || !password}
+                onClick={() => auth("register")}
+              >
+                {t.onboarding.register}
+              </Button>
+            </div>
+            <button
+              onClick={() => {
+                setForgot(true);
+                setError(null);
+                setInfo(null);
+              }}
+              className="label-mono text-fg-tertiary hover:text-fg-primary"
+            >
+              {t.onboarding.forgotPassword}
+            </button>
+          </div>
+        )
       ) : (
         <p className="text-xs text-fg-tertiary">
           云端未配置，仅本地模式可用。
