@@ -6,7 +6,7 @@ import { useAppStore } from "@/lib/store";
 import { getDomain } from "@/lib/domains";
 import { computeMaturity } from "@/lib/methodology";
 import { downloadProject, importProject } from "@/lib/db/export-import";
-import { getSupabase } from "@/lib/supabase/client";
+import { getSupabase, sendPasswordReset } from "@/lib/supabase/client";
 import { pushProject, pullProject, listRemoteProjects } from "@/lib/supabase/sync";
 import { clearAll } from "@/lib/db/storage";
 import PromptSettings from "./PromptSettings";
@@ -91,6 +91,19 @@ export default function Header() {
     const r = await pullProject(target.id);
     if (r.ok) await loadProject(target.id);
     flash(r.message);
+  }
+
+  // 已登录用户在应用内重置密码：向账号邮箱发验证邮件（登录界面只在引导时出现）
+  async function onResetPassword() {
+    if (!userEmail) return;
+    setMenuOpen(false);
+    flash("发送中…");
+    try {
+      await sendPasswordReset(userEmail);
+      flash(`重置邮件已发送至 ${userEmail}，请查收（含垃圾箱）。`);
+    } catch (e) {
+      flash(`发送失败：${e instanceof Error ? e.message : e}`);
+    }
   }
 
   async function onLogout(clearLocal: boolean) {
@@ -190,6 +203,13 @@ export default function Header() {
                   className="label-mono block w-full rounded-sm px-2 py-1 text-left text-fg-secondary hover:bg-bg-hover"
                 >
                   ⬇ 从云端拉取
+                </button>
+                <button
+                  onClick={onResetPassword}
+                  title="向账号邮箱发送重置密码验证邮件"
+                  className="label-mono block w-full rounded-sm px-2 py-1 text-left text-fg-secondary hover:bg-bg-hover"
+                >
+                  ✉ 重置密码
                 </button>
                 <div className="my-1 border-t border-border" />
               </>
